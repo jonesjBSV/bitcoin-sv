@@ -1,0 +1,25 @@
+services:
+  bitcoin-sv:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    volumes:
+      - ./data:/root/.bitcoin
+      - ./source:/bitcoin-sv
+    ports:
+      - "8333:8333"  # P2P port
+      - "8332:8332"  # RPC port
+    environment:
+      - BITCOIN_RPC_USER=rpcuser
+      - BITCOIN_RPC_PASSWORD=rpcpassword
+    deploy:
+      resources:
+        limits:
+          memory: 8G
+        reservations:
+          memory: 4G
+    command: bitcoind
+    restart: unless-stopped
+
+volumes:
+  data:
