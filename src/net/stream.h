@@ -45,6 +45,7 @@ enum class StreamType : uint8_t
     DATA2,
     DATA3,
     DATA4,
+    IMMEDIATE,
 
     MAX_STREAM_TYPE
 };

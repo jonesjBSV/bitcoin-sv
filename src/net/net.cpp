@@ -8,6 +8,8 @@
 #endif
 
 #include "net/net.h"
+#include "netmessagemaker.h"
+#include "protocol.h"
 
 #include "addrman.h"
 #include "chainparams.h"
@@ -3408,8 +3410,12 @@ bool CConnman::BroadcastInventory(const CInv& inv, bool useMulticast) {
     {
         LOCK(cs_vNodes);
         for (const CNodePtr& pnode : vNodes) {
-            if (pnode->fSuccessfullyConnected)
-                pnode->PushInventory(inv);
+            if (pnode->fSuccessfullyConnected) {
+                // Replace direct PushInventory call with PushMessage
+                CNetMsgMaker msgMaker(pnode->GetSendVersion());
+                std::vector<CInv> vInv = {inv};
+                PushMessage(pnode, msgMaker.Make(NetMsgType::INV, vInv));
+            }
         }
     }
 
@@ -3428,8 +3434,11 @@ bool CConnman::BroadcastTransaction(const CTransaction& tx, bool useMulticast) {
         LOCK(cs_vNodes);
         for (const CNodePtr& pnode : vNodes) {
             if (pnode->fSuccessfullyConnected) {
-                pnode->PushInventory(inv);
-                pnode->PushMessage("tx", tx);
+                // Replace direct calls with PushMessage using CNetMsgMaker
+                CNetMsgMaker msgMaker(pnode->GetSendVersion());
+                std::vector<CInv> vInv = {inv};
+                PushMessage(pnode, msgMaker.Make(NetMsgType::INV, vInv));
+                PushMessage(pnode, msgMaker.Make(NetMsgType::TX, tx));
             }
         }
     }
@@ -3448,8 +3457,12 @@ bool CConnman::BroadcastBlock(const CBlock& block, bool useMulticast) {
     {
         LOCK(cs_vNodes);
         for (const CNodePtr& pnode : vNodes) {
-            if (pnode->fSuccessfullyConnected)
-                pnode->PushInventory(inv);
+            if (pnode->fSuccessfullyConnected) {
+                // Replace direct PushInventory call with PushMessage
+                CNetMsgMaker msgMaker(pnode->GetSendVersion());
+                std::vector<CInv> vInv = {inv};
+                PushMessage(pnode, msgMaker.Make(NetMsgType::INV, vInv));
+            }
         }
     }
 

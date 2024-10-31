@@ -125,3 +125,6 @@ add_custom_target(check)
 
 add_subdirectory(src)
 add_subdirectory(test)
+
+find_package(Boost REQUIRED COMPONENTS signals)
+include_directories(${Boost_INCLUDE_DIRS})

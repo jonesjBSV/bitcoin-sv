@@ -51,9 +51,20 @@ WORKDIR /bitcoin-sv
 # Copy source code (assuming it's in the build context)
 COPY . .
 
-# Build Bitcoin SV with limited parallel jobs and IPv6 support
+# Build Bitcoin SV with IPv6 multicast support
 RUN ./autogen.sh && \
-    ./configure --enable-hardening --enable-ipv6 && \
+    ./configure \
+        --enable-hardening \
+        --enable-ipv6 \
+        --enable-ipv6-multicast \
+        CPPFLAGS="-I$(pwd)/src \
+                  -I$(pwd)/src/config \
+                  -I$(pwd)/src/net \
+                  -I$(pwd)/src/consensus \
+                  -I$(pwd)/src/primitives \
+                  -I$(pwd)/src/script \
+                  -I$(pwd)/src/univalue/include \
+                  -I$(pwd)/src/crypto" && \
     make -j1 && \
     make install
 

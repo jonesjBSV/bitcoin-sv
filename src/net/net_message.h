@@ -12,6 +12,8 @@
 #include "msg_buffer.h"
 
 #include <stdexcept>
+#include <string>
+#include <vector>
 
 class CNetMessage {
 private:
@@ -65,4 +67,21 @@ class BanPeer : public std::runtime_error
   public:
     explicit BanPeer(const std::string& msg) : std::runtime_error{msg} {}
 };
+
+class CSerializedNetMsg {
+public:
+    std::string Command() const { return command; }
+    const std::vector<uint8_t>& Message() const { return data; }
+    bool IsHighPriority() const { return immediate; }
+
+private:
+    std::string command;
+    std::vector<uint8_t> data;
+    bool immediate;
+};
+
+#ifndef BITCOIN_NET_NET_MESSAGE_H
+#define BITCOIN_NET_NET_MESSAGE_H
+
+#endif // BITCOIN_NET_NET_MESSAGE_H
 

@@ -1,35 +1,34 @@
-version: '3.8'
-
 services:
   bitcoin-sv:
     build:
       context: .
       dockerfile: Dockerfile
     volumes:
-      - ./data:/root/.bitcoin
-      - ./source:/bitcoin-sv
+      - bitcoin_data:/data
     ports:
       - "8333:8333"      # P2P port IPv4
-      - "8333:8333/udp"  # P2P port UDP for IPv4 multicast
+      - "8333:8333/udp"  # P2P port UDP for IPv4/IPv6 multicast
       - "[::]:8333:8333" # P2P port IPv6
       - "8332:8332"      # RPC port IPv4
       - "[::]:8332:8332" # RPC port IPv6
     environment:
-      - BITCOIN_RPC_USER=rpcuser
-      - BITCOIN_RPC_PASSWORD=rpcpassword
+      - BITCOIN_RPC_USER=${BITCOIN_RPC_USER:-rpcuser}
+      - BITCOIN_RPC_PASSWORD=${BITCOIN_RPC_PASSWORD:-rpcpassword}
     deploy:
       resources:
         limits:
           memory: 8G
         reservations:
           memory: 4G
-    command: bitcoind
-    restart: unless-stopped
     sysctls:
       - net.ipv6.conf.all.disable_ipv6=0
       - net.ipv6.conf.default.disable_ipv6=0
+      - net.ipv6.conf.all.forwarding=1
+    cap_add:
+      - NET_ADMIN  # Required for IPv6 configuration
     networks:
-      - bitcoin_net
+      bitcoin_net:
+        ipv6_address: 2001:db8:1::2
 
 networks:
   bitcoin_net:
@@ -40,6 +39,7 @@ networks:
       config:
         - subnet: 172.16.238.0/24
         - subnet: 2001:db8:1::/64
+          gateway: 2001:db8:1::1
 
 volumes:
-  data:
+  bitcoin_data:

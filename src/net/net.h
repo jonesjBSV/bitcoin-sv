@@ -1,9 +1,3 @@
-// Copyright (c) 2009-2010 Satoshi Nakamoto
-// Copyright (c) 2009-2016 The Bitcoin Core developers
-// Copyright (c) 2017 The Bitcoin developers
-// Copyright (c) 2019-2020 Bitcoin Association
-// Distributed under the Open BSV software license, see the accompanying file LICENSE.
-
 #ifndef BITCOIN_NET_H
 #define BITCOIN_NET_H
 
@@ -22,21 +16,11 @@
 #include "net/authconn.h"
 #include "net/net_message.h"
 #include "net/net_types.h"
-#include "net/node_stats.h"
-#include "net/stream_policy_factory.h"
-#include "netaddress.h"
+#include "net/node_state.h"
 #include "protocol.h"
 #include "random.h"
 #include "sync.h"
 #include "task_helpers.h"
-#include "threadinterrupt.h"
-#include "txmempool.h"
-#include "txn_sending_details.h"
-#include "txn_validation_config.h"
-#include "uint256.h"
-#include "validation.h"
-#include "validation_scheduler.h"
-#include "ipv6_multicast_processor.h"
 
 #include <atomic>
 #include <condition_variable>
@@ -58,9 +42,21 @@
 #include <boost/multi_index/ordered_index.hpp>
 #include <boost/signals2/signal.hpp>
 
+#include "net/node_state.h"
+#include "serialize.h"
+
+#include "net/stream_policy_factory.h"
+#include "net/node_stats.h"
+#include "net/txn_sending_details.h"
+#include "net/validation_scheduler.h"
+#include "net/ipv6_multicast_processor.h"
+#include "threadinterrupt.h"
+
+// Forward declare CNode
+class CNode;
+
 class CAddrMan;
 class Config; // NOLINT(cppcoreguidelines-virtual-class-destructor)
-class CNode;
 class CScheduler;
 class CTxIdTracker;
 class CTxnPropagator;
@@ -231,76 +227,6 @@ class CTransaction;
 class CNodeStats;
 class CClientUIInterface;
 
-// NOLINTNEXTLINE(cppcoreguidelines-special-member-functions)
-class CSerializedNetMsg
-{
-public:
-    // Optional metadata to describe the contents of the payload, for when
-    // it might not be obvious from the message type alone.
-    enum class PayloadType { UNKNOWN, BLOCK };
-
-    CSerializedNetMsg(CSerializedNetMsg &&) = default;
-    CSerializedNetMsg &operator=(CSerializedNetMsg &&) = default;
-    // No copying, only moves.
-    CSerializedNetMsg(const CSerializedNetMsg &msg) = delete;
-    CSerializedNetMsg &operator=(const CSerializedNetMsg &) = delete;
-
-    CSerializedNetMsg(
-        std::string&& command,
-        PayloadType payloadType,
-        std::vector<uint8_t>&& data)
-        : mCommand{std::move(command)}
-        , mPayloadType{payloadType}
-        , mSize{data.size()}
-    {
-        // Only calculate message hash for non-extended messages
-        if(! CMessageHeader::IsExtended(mSize))
-        {
-            // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-pointer-arithmetic)
-            mHash = ::Hash(data.data(), data.data() + data.size());
-        }
-        mData = std::make_unique<CVectorStream>(std::move(data));
-    }
-
-    CSerializedNetMsg(
-        std::string&& command,
-        const uint256& hash,
-        size_t size,
-        std::unique_ptr<CForwardAsyncReadonlyStream> data)
-        : mCommand{std::move(command)}
-        , mHash{hash}
-        , mSize{size}
-        , mData{std::move(data)}
-    {/**/}
-
-    const std::string& Command() const {return mCommand;}
-    PayloadType GetPayloadType() const {return mPayloadType;}
-    std::unique_ptr<CForwardAsyncReadonlyStream> MoveData() {return std::move(mData);}
-    const uint256& Hash() const {return mHash;}
-    size_t Size() const {return mSize;}
-
-    size_t GetEstimatedMemoryUsage() const
-    {
-        size_t dataUsage { mData? mData->GetEstimatedMaxMemoryUsage() : 0 };
-        return sizeof(*this) + dataUsage;
-    }
-
-private:
-    std::string mCommand {};
-    PayloadType mPayloadType { PayloadType::UNKNOWN };
-    uint256 mHash {};
-    size_t mSize {0};
-    std::unique_ptr<CForwardAsyncReadonlyStream> mData {nullptr};
-
-public:
-    // If specified, this function will be called to create a CVectorStream object which will be
-    // added to the P2P sending queue to send P2P header of this P2P message.
-    // Otherwise (empty function), CVectorStream object will be created in a default way.
-    // The purpose of this is to be able to create an object of derived class with additional
-    // functionality (e.g. detect when the message was sent in the destructor).
-    std::function< std::unique_ptr<CVectorStream> (std::vector<uint8_t>&& serialisedHeader) > headerStreamCreator;
-};
-
 class CConnman {
 public:
     enum NumConnections {
@@ -361,7 +287,7 @@ public:
     /** Enqueue a new transaction for later sending to our peers */
     bool EnqueueTransaction(const CTxnSendingDetails& txn);
     /** Remove some transactions from our peers list of new transactions */
-    void DequeueTransactions(const std::vector<CTransactionRef>& txns);
+    void DequeueTransactions(const std::vector<CTxnSendingDetails>& txns);
 
     /** Get a handle to our transaction propagator */
     const std::shared_ptr<CTxnPropagator>& getTransactionPropagator() const { return mTxnPropagator; }
@@ -816,6 +742,27 @@ public:
     bool BroadcastTransaction(const CTransaction& tx, bool useMulticast = true);
     bool BroadcastBlock(const CBlock& block, bool useMulticast = true);
     bool BroadcastAddress(const CAddress& addr, bool useMulticast = true);
+
+    /** Send a message to a node */
+    bool PushMessage(const CNodePtr& pnode, CSerializedNetMsg&& msg)
+    {
+        size_t nMessageSize { msg.Message().size() };
+        LogPrint(BCLog::NET, "sending %s (%d bytes) peer=%d\n",
+                 SanitizeString(msg.Command().c_str()), nMessageSize,
+                 pnode->GetId());
+
+        if(msg.IsHighPriority()) {
+            LOCK(pnode->cs_vSend);
+            if(pnode->CanSendData()) {
+                pnode->PushMessage(std::move(msg), StreamType::IMMEDIATE);
+            }
+        }
+        else {
+            pnode->PushMessage(std::move(msg), StreamType::GENERAL);
+        }
+
+        return true;
+    }
 };
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 extern std::unique_ptr<CConnman> g_connman;

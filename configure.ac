@@ -1408,3 +1408,16 @@ echo "  CXXFLAGS          = $CXXFLAGS"
 echo "  LDFLAGS           = $LDFLAGS"
 
 echo
+
+# Add after the existing options
+AC_ARG_ENABLE([ipv6-multicast],
+    [AS_HELP_STRING([--enable-ipv6-multicast],
+                    [enable IPv6 multicast support (default is yes)])],
+    [enable_ipv6_multicast=$enableval],
+    [enable_ipv6_multicast=yes])
+
+AM_CONDITIONAL([ENABLE_IPV6_MULTICAST], [test "x$enable_ipv6_multicast" = "xyes"])
+
+if test "x$enable_ipv6_multicast" = "xyes"; then
+    AC_DEFINE([ENABLE_IPV6_MULTICAST], [1], [Define to 1 to enable IPv6 multicast support])
+fi

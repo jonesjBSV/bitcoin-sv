@@ -175,3 +175,38 @@ DISTCHECK_CONFIGURE_FLAGS = --enable-man
 clean-local:
 	rm -rf coverage_percent.txt test_bitcoin.coverage/ total.coverage/ test/tmp/ cache/ 
 	rm -rf test/functional/__pycache__
+
+# Add include paths
+AM_CPPFLAGS = \
+  -I$(top_srcdir)/src \
+  -I$(top_srcdir)/src/config \
+  -I$(top_srcdir)/src/net \
+  -I$(top_srcdir)/src/primitives \
+  -I$(top_srcdir)/src/script \
+  -I$(top_srcdir)/src/test \
+  -I$(top_srcdir)/src/univalue/include \
+  -I$(top_srcdir)/src/leveldb/include \
+  $(BOOST_CPPFLAGS) \
+  $(LEVELDB_CPPFLAGS) \
+  $(CRYPTO_CFLAGS) \
+  $(SSL_CFLAGS)
+
+# Add library paths
+AM_LDFLAGS = \
+  $(PTHREAD_CFLAGS) \
+  $(LIBTOOL_LDFLAGS) \
+  $(BOOST_LDFLAGS)
+
+# Add required libraries
+BITCOIN_LIBS = \
+  $(BOOST_LIBS) \
+  $(CRYPTO_LIBS) \
+  $(SSL_LIBS) \
+  $(PTHREAD_LIBS)
+
+# IPv6 multicast specific flags
+if ENABLE_IPV6_MULTICAST
+AM_CPPFLAGS += -DENABLE_IPV6_MULTICAST
+endif
+
+CXXFLAGS += -I/usr/include/boost
