@@ -1609,6 +1609,13 @@ std::string HelpMessage(HelpMessageMode mode, const Config& config) {
         strprintf("Minimum length of valid fork to enter safe mode "
             "(default: %d)", SAFE_MODE_DEFAULT_MIN_FORK_LENGTH));
 
+    strUsage += HelpMessageGroup(_("IPv6 Multicast options:"));
+    strUsage += HelpMessageOpt("-multicast", strprintf(_("Enable IPv6 multicast (default: %u)"), DEFAULT_MULTICAST));
+    strUsage += HelpMessageOpt("-multicastaddr=<addr>", strprintf(_("IPv6 multicast address (default: %s)"), "ff02::1"));
+    strUsage += HelpMessageOpt("-multicastport=<port>", strprintf(_("IPv6 multicast port (default: %u)"), DEFAULT_P2P_PORT));
+    strUsage += HelpMessageOpt("-multicastttl=<ttl>", strprintf(_("IPv6 multicast time-to-live (default: %u)"), 1));
+    strUsage += HelpMessageOpt("-multicastloop", strprintf(_("Enable IPv6 multicast loopback (default: %u)"), 0));
+
     return strUsage;
 }
 
@@ -3476,7 +3483,7 @@ bool AppInitMain(ConfigInit &config, boost::thread_group &threadGroup,
                                  (gArgs.GetBoolArg("-txindex", DEFAULT_TXINDEX)
                                       ? nMaxBlockDBAndTxIndexCache
                                       : nMaxBlockDBCache)
-                                     << 20);
+                                     << 20;
     nTotalCache -= nBlockTreeDBCache;
     // use 25%-50% of the remainder for disk cache
     int64_t nCoinDBCache =
@@ -3847,5 +3854,44 @@ std::atomic_bool& GetAppInitCompleted()
 {
     static std::atomic_bool appInitCompleted {false};
     return appInitCompleted;
+}
+
+bool static InitializeIPv6Multicast(CConnman& connman)
+{
+    if (!gArgs.GetBoolArg("-multicast", DEFAULT_MULTICAST)) {
+        return true;  // Multicast not requested
+    }
+
+    if (!gArgs.GetBoolArg("-ipv6", DEFAULT_IPV6)) {
+        LogPrintf("IPv6 multicast requires IPv6 to be enabled\n");
+        return false;
+    }
+
+    // Get multicast configuration
+    std::string multicastAddr = gArgs.GetArg("-multicastaddr", "ff02::1");
+    int multicastPort = gArgs.GetArg("-multicastport", DEFAULT_P2P_PORT);
+    int multicastTTL = gArgs.GetArg("-multicastttl", 1);
+    bool multicastLoop = gArgs.GetBoolArg("-multicastloop", false);
+
+    if (!connman.EnableIPv6Multicast()) {
+        LogPrintf("Failed to initialize IPv6 multicast\n");
+        return false;
+    }
+
+    LogPrintf("IPv6 multicast enabled: addr=%s port=%d ttl=%d loop=%d\n",
+              multicastAddr, multicastPort, multicastTTL, multicastLoop);
+    return true;
+}
+
+bool AppInit2()
+{
+    // ... existing initialization code ...
+
+    // Initialize IPv6 multicast if requested
+    if (!InitializeIPv6Multicast(*g_connman)) {
+        return false;
+    }
+
+    // ... rest of function ...
 }
 
