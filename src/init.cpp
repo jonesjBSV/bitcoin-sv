@@ -1926,6 +1926,18 @@ void InitParameterInteraction() {
                       "setting -whitelistrelay=1\n",
                       __func__);
     }
+
+    // IPv6 multicast requires IPv6
+    if (gArgs.GetBoolArg("-multicast", DEFAULT_MULTICAST)) {
+        if (!gArgs.GetBoolArg("-ipv6", DEFAULT_IPV6)) {
+            return InitError(_("IPv6 multicast requires IPv6 to be enabled. Please add -ipv6=1 to your configuration."));
+        }
+
+        // Validate multicast configuration
+        if (!ValidateIPv6MulticastOptions()) {
+            return false;
+        }
+    }
 }
 
 static std::string ResolveErrMsg(const char *const optname,
@@ -3893,5 +3905,103 @@ bool AppInit2()
     }
 
     // ... rest of function ...
+}
+
+bool static ValidateIPv6MulticastOptions() {
+    if (!gArgs.GetBoolArg("-multicast", DEFAULT_MULTICAST)) {
+        return true;  // Multicast not requested, no validation needed
+    }
+
+    // Validate multicast address
+    std::string multicastAddr = gArgs.GetArg("-multicastaddr", "ff02::1");
+    struct in6_addr addr;
+    if (inet_pton(AF_INET6, multicastAddr.c_str(), &addr) != 1) {
+        return InitError(_("Invalid IPv6 multicast address specified with -multicastaddr"));
+    }
+
+    // Verify it's actually a multicast address (starts with ff)
+    if ((addr.s6_addr[0] != 0xff)) {
+        return InitError(_("Address specified with -multicastaddr is not a multicast address"));
+    }
+
+    // Validate multicast port
+    int multicastPort = gArgs.GetArg("-multicastport", DEFAULT_P2P_PORT);
+    if (multicastPort <= 0 || multicastPort > 65535) {
+        return InitError(strprintf(_("Invalid port %u for IPv6 multicast"), multicastPort));
+    }
+
+    // Validate TTL
+    int multicastTTL = gArgs.GetArg("-multicastttl", DEFAULT_MULTICAST_TTL);
+    if (multicastTTL < 0 || multicastTTL > 255) {
+        return InitError(strprintf(_("Invalid TTL %d for IPv6 multicast"), multicastTTL));
+    }
+
+    return true;
+}
+
+bool AppInitParameterInteraction() {
+    // ... existing code ...
+
+    // IPv6 multicast requires IPv6
+    if (gArgs.GetBoolArg("-multicast", DEFAULT_MULTICAST)) {
+        if (!gArgs.GetBoolArg("-ipv6", DEFAULT_IPV6)) {
+            return InitError(_("IPv6 multicast requires IPv6 to be enabled. Please add -ipv6=1 to your configuration."));
+        }
+
+        // Validate multicast configuration
+        if (!ValidateIPv6MulticastOptions()) {
+            return false;
+        }
+    }
+
+    // ... rest of function ...
+}
+
+std::string HelpMessage(HelpMessageMode mode) {
+    // ... existing help messages ...
+
+    strUsage += HelpMessageGroup(_("IPv6 Multicast options:"));
+    strUsage += HelpMessageOpt("-multicast",
+        strprintf(_("Enable IPv6 multicast support (default: %u)"), DEFAULT_MULTICAST));
+    strUsage += HelpMessageOpt("-multicastaddr=<addr>",
+        strprintf(_("IPv6 multicast address (default: %s)"), "ff02::1"));
+    strUsage += HelpMessageOpt("-multicastport=<port>",
+        strprintf(_("IPv6 multicast port (default: %u)"), DEFAULT_P2P_PORT));
+    strUsage += HelpMessageOpt("-multicastttl=<n>",
+        strprintf(_("Time-to-live for IPv6 multicast packets (default: %u)"), DEFAULT_MULTICAST_TTL));
+    strUsage += HelpMessageOpt("-multicastloop",
+        strprintf(_("Enable multicast loopback (default: %u)"), DEFAULT_MULTICAST_LOOP));
+    strUsage += HelpMessageOpt("-multicastinterface=<name>",
+        _("Interface for IPv6 multicast (default: all interfaces)"));
+
+    // ... rest of function ...
+}
+
+bool InitializeIPv6Multicast(CConnman& connman) {
+    if (!gArgs.GetBoolArg("-multicast", DEFAULT_MULTICAST)) {
+        LogPrintf("IPv6 multicast is disabled\n");
+        return true;
+    }
+
+    // Get multicast configuration
+    std::string multicastAddr = gArgs.GetArg("-multicastaddr", "ff02::1");
+    int multicastPort = gArgs.GetArg("-multicastport", DEFAULT_P2P_PORT);
+    int multicastTTL = gArgs.GetArg("-multicastttl", DEFAULT_MULTICAST_TTL);
+    bool multicastLoop = gArgs.GetBoolArg("-multicastloop", DEFAULT_MULTICAST_LOOP);
+    std::vector<std::string> multicastInterfaces;
+    
+    if (gArgs.IsArgSet("-multicastinterface")) {
+        multicastInterfaces = gArgs.GetArgs("-multicastinterface");
+    }
+
+    LogPrintf("Initializing IPv6 multicast: addr=%s port=%d ttl=%d loop=%d interfaces=%d\n",
+              multicastAddr, multicastPort, multicastTTL, multicastLoop,
+              multicastInterfaces.empty() ? 0 : multicastInterfaces.size());
+
+    if (!connman.EnableIPv6Multicast()) {
+        return InitError(_("Failed to initialize IPv6 multicast. Check debug.log for details."));
+    }
+
+    return true;
 }
 
