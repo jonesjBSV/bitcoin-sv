@@ -36,6 +36,7 @@
 #include "uint256.h"
 #include "validation.h"
 #include "validation_scheduler.h"
+#include "ipv6_multicast_processor.h"
 
 #include <atomic>
 #include <condition_variable>
@@ -800,6 +801,21 @@ private:
 
     /** Invalid transaction publisher*/
     CInvalidTxnPublisher mInvalidTxnPublisher;
+
+    std::unique_ptr<IPv6MulticastProcessor> ipv6MulticastProcessor;
+    bool fEnableIPv6Multicast{false};
+
+public:
+    // IPv6 Multicast methods
+    bool EnableIPv6Multicast();
+    bool DisableIPv6Multicast();
+    bool IsIPv6MulticastEnabled() const { return fEnableIPv6Multicast; }
+    
+    // Enhanced broadcast methods to support IPv6 multicast
+    bool BroadcastInventory(const CInv& inv, bool useMulticast = true);
+    bool BroadcastTransaction(const CTransaction& tx, bool useMulticast = true);
+    bool BroadcastBlock(const CBlock& block, bool useMulticast = true);
+    bool BroadcastAddress(const CAddress& addr, bool useMulticast = true);
 };
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 extern std::unique_ptr<CConnman> g_connman;

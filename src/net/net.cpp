@@ -3372,3 +3372,90 @@ std::string userAgent() {
 
     return subversion;
 }
+
+bool CConnman::EnableIPv6Multicast() {
+    LOCK(cs_vNodes);
+    if (fEnableIPv6Multicast) return true;  // Already enabled
+
+    try {
+        ipv6MulticastProcessor = std::make_unique<IPv6MulticastProcessor>(*this);
+        if (!ipv6MulticastProcessor->Start()) {
+            ipv6MulticastProcessor.reset();
+            return false;
+        }
+        fEnableIPv6Multicast = true;
+        return true;
+    } catch (const std::exception& e) {
+        LogPrintf("Error enabling IPv6 multicast: %s\n", e.what());
+        return false;
+    }
+}
+
+bool CConnman::DisableIPv6Multicast() {
+    LOCK(cs_vNodes);
+    if (!fEnableIPv6Multicast) return true;  // Already disabled
+
+    if (ipv6MulticastProcessor) {
+        ipv6MulticastProcessor->Stop();
+        ipv6MulticastProcessor.reset();
+    }
+    fEnableIPv6Multicast = false;
+    return true;
+}
+
+bool CConnman::BroadcastInventory(const CInv& inv, bool useMulticast) {
+    // First, broadcast through regular P2P network
+    {
+        LOCK(cs_vNodes);
+        for (const CNodePtr& pnode : vNodes) {
+            if (pnode->fSuccessfullyConnected)
+                pnode->PushInventory(inv);
+        }
+    }
+
+    // Then, if enabled, broadcast through IPv6 multicast
+    if (useMulticast && fEnableIPv6Multicast && ipv6MulticastProcessor) {
+        return ipv6MulticastProcessor->BroadcastInventory(inv);
+    }
+    return true;
+}
+
+bool CConnman::BroadcastTransaction(const CTransaction& tx, bool useMulticast) {
+    CInv inv(MSG_TX, tx.GetHash());
+    
+    // Regular P2P broadcast
+    {
+        LOCK(cs_vNodes);
+        for (const CNodePtr& pnode : vNodes) {
+            if (pnode->fSuccessfullyConnected) {
+                pnode->PushInventory(inv);
+                pnode->PushMessage("tx", tx);
+            }
+        }
+    }
+
+    // IPv6 multicast broadcast
+    if (useMulticast && fEnableIPv6Multicast && ipv6MulticastProcessor) {
+        return ipv6MulticastProcessor->BroadcastTransaction(tx);
+    }
+    return true;
+}
+
+bool CConnman::BroadcastBlock(const CBlock& block, bool useMulticast) {
+    CInv inv(MSG_BLOCK, block.GetHash());
+    
+    // Regular P2P broadcast
+    {
+        LOCK(cs_vNodes);
+        for (const CNodePtr& pnode : vNodes) {
+            if (pnode->fSuccessfullyConnected)
+                pnode->PushInventory(inv);
+        }
+    }
+
+    // IPv6 multicast broadcast
+    if (useMulticast && fEnableIPv6Multicast && ipv6MulticastProcessor) {
+        return ipv6MulticastProcessor->BroadcastBlock(block);
+    }
+    return true;
+}

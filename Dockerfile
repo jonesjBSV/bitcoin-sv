@@ -36,6 +36,9 @@ RUN apt-get update && apt-get install -y \
     python3-ecdsa \
     python3-zmq \
     python3-bip32utils \
+    # IPv6 multicast dependencies
+    iproute2 \
+    iputils-ping \
     && rm -rf /var/lib/apt/lists/*
 
 # Set GCC 10 as the default compiler
@@ -48,14 +51,14 @@ WORKDIR /bitcoin-sv
 # Copy source code (assuming it's in the build context)
 COPY . .
 
-# Build Bitcoin SV with limited parallel jobs
+# Build Bitcoin SV with limited parallel jobs and IPv6 support
 RUN ./autogen.sh && \
-    ./configure --enable-hardening && \
+    ./configure --enable-hardening --enable-ipv6 && \
     make -j1 && \
     make install
 
 # Verify binary exists and is executable
 RUN test -x /usr/local/bin/bitcoind || exit 1
 
-# Default command
-CMD ["bitcoind"]
+# Default command with IPv6 options
+CMD ["bitcoind", "-listen", "-discover", "-ipv6", "-multicast"]
