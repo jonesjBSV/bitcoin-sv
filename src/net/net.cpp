@@ -24,7 +24,6 @@
 #include "primitives/transaction.h"
 #include "scheduler.h"
 #include "taskcancellation.h"
-#include "txn_propagator.h"
 #include "txn_validator.h"
 #include "rawtxvalidator.h"
 #include "ui_interface.h"
@@ -719,60 +718,27 @@ void CNode::RunAsyncProcessing(
         source);
 }
 
-void CNode::copyStats(NodeStats &stats)
-{
+void CNode::copyStats(NodeStats& stats) {
     mAssociation.CopyStats(stats.associationStats);
-
-    stats.nodeid = this->GetId();
-    stats.nServices = nServices;
-    {
-        LOCK(cs_filter);
-        stats.fRelayTxes = fRelayTxes;
-    }
-    stats.fPauseSend = GetPausedForSending();
-    stats.fUnpauseSend = stats.fPauseSend && !GetPausedForSending(true);
-    stats.fAuthConnEstablished = fAuthConnEstablished;
-    stats.nTimeConnected = nTimeConnected;
-    stats.nTimeOffset = nTimeOffset;
-    stats.addrName = GetAddrName();
-    stats.nVersion = nVersion;
-    {
-        LOCK(cs_SubVer);
-        stats.cleanSubVer = cleanSubVer;
-    }
-    stats.fInbound = fInbound;
-    stats.fAddnode = fAddnode;
-    stats.nStartingHeight = nStartingHeight;
-    stats.fWhitelisted = fWhitelisted;
-
-    // It is common for nodes with good ping times to suddenly become lagged,
-    // due to a new block arriving or other large transfer. Merely reporting
-    // pingtime might fool the caller into thinking the node was still
-    // responsive, since pingtime does not update until the ping is complete,
-    // which might take a while. So, if a ping is taking an unusually long time
-    // in flight, the caller can immediately detect that this is happening.
-    int64_t nPingUsecWait = 0;
-    if ((0 != nPingNonceSent) && (0 != nPingUsecStart)) {
-        nPingUsecWait = GetTimeMicros() - nPingUsecStart;
-    }
-
-    // Raw ping time is in microseconds, but show it to user as whole seconds
-    // (Bitcoin users should be well used to small numbers with many decimal
-    // places by now :)
-    stats.dPingTime = ((double(nPingUsecTime)) / 1e6);
-    stats.dMinPing = ((double(nMinPingUsecTime)) / 1e6);
-    stats.dPingWait = ((double(nPingUsecWait)) / 1e6);
-
-    // Leave string empty if addrLocal invalid (not filled in yet)
-    CService addrLocalUnlocked = mAssociation.GetPeerAddrLocal();
-    stats.addrLocal =
-        addrLocalUnlocked.IsValid() ? addrLocalUnlocked.ToString() : "";
-
-    {
-        // Fetch size of inventory queue
-        LOCK(cs_mInvList);
-        stats.nInvQueueSize = mInvList.size();
-    }
+    stats.id = GetId();
+    stats.services = nServices;
+    stats.relayTxes = fRelayTxes;
+    stats.pauseSend = GetPausedForSending();
+    stats.unpauseSend = stats.pauseSend && !GetPausedForSending(true);
+    stats.authConnEstablished = fAuthConnEstablished;
+    stats.timeConnected = nTimeConnected;
+    stats.timeOffset = nTimeOffset;
+    stats.version = nVersion;
+    stats.subVer = cleanSubVer;
+    stats.inbound = fInbound;
+    stats.addnode = fAddnode;
+    stats.startingHeight = nStartingHeight;
+    stats.whitelisted = fWhitelisted;
+    stats.pingTime = ((double(nPingUsecTime)) / 1e6);
+    stats.minPing = ((double(nMinPingUsecTime)) / 1e6);
+    stats.pingWait = ((double(nPingUsecStart)) / 1e6);
+    stats.addr = addrLocal;
+    stats.invQueueSize = mInvList.size();
 }
 
 /**
@@ -780,47 +746,17 @@ void CNode::copyStats(NodeStats &stats)
 * Assumes the caller has taken care of locking access to the mempool,
 * and so can be called in parallel.
 */
-void CNode::AddTxnsToInventory(const std::vector<CTxnSendingDetails>& txns)
-{
-    // Get our minimum fee
-    Amount filterrate {0};
-    {   
-        LOCK(cs_feeFilter);
-        filterrate = minFeeFilter;
-    }
-
-    // reason for larger cs_inventory lock scope than needed is that if we need
-    // to lock both cs_inventory and cs_filter we need to consistently lock
-    // inventory before cs_filter to prevent deadlocks
-    LOCK(cs_inventory);
-    LOCK(cs_filter);
-    LOCK(cs_mInvList);
-
-    if(!fRelayTxes)
-    {
-        // Clear any txns we have queued for this peer
-        mInvList.clear();
-    }
-    else
-    {
-        for(const CTxnSendingDetails& txn : txns)
-        {
-            // Don't bother if below peer's fee rate
-            auto const & info = txn.getInfo();
-            const Amount fee = info.feeRate.GetFee(info.nTxSize);
-            const Amount totalFilterFee = CFeeRate{filterrate}.GetFee(info.nTxSize);
-            if(filterrate != Amount{0} && fee + info.nFeeDelta < totalFilterFee)
-                continue;
-
-            // Check and update bloom filters
-            if(filterInventoryKnown.contains(txn.getInv().hash))
-                continue;
-            if(!mFilter.IsRelevantAndUpdate(*(txn.getTxnRef())))
-                continue;
-
-            mInvList.emplace_back(txn);
-            filterInventoryKnown.insert(txn.getInv().hash);
-        }
+void CNode::AddTxnsToInventory(const std::vector<CTxnSendingDetails>& txns) {
+    for(const auto& txn : txns) {
+        auto const & info = txn.info;  // Direct member access
+        
+        if(filterInventoryKnown.contains(txn.inv.hash))  // Direct member access
+            continue;
+            
+        if(!mFilter.IsRelevantAndUpdate(*(txn.tx)))  // Direct member access
+            continue;
+            
+        filterInventoryKnown.insert(txn.inv.hash);  // Direct member access
     }
 }
 
@@ -838,7 +774,7 @@ void CNode::RemoveTxnsFromInventory(const std::set<CInv>& toRemove)
         std::remove_if(
             mInvList.begin(), mInvList.end(), 
             [&toRemove](const CTxnSendingDetails& i) {
-                return toRemove.find(i.getInv()) != toRemove.end(); 
+                return toRemove.find(i.GetInv()) != toRemove.end(); 
             }), 
         mInvList.end());    
 }
@@ -2189,7 +2125,7 @@ void CConnman::ThreadMessageHandler()
 
             // Send messages
             {
-                LOCK(pnode->cs_sendProcessing);
+                LOCK(pnode->cs_vSendMsg);  // Original member name
                 GetNodeSignals().SendMessages(*config, pnode, *this,
                                               flagInterruptMsgProc);
             }
@@ -3061,37 +2997,21 @@ bool CConnman::NodeFullyConnected(const CNodePtr& pnode) {
     return pnode && pnode->fSuccessfullyConnected && !pnode->fDisconnect;
 }
 
-void CConnman::PushMessage(const CNodePtr& pnode, CSerializedNetMsg&& msg, StreamType stream)
-{
-    // Ensure we don't send extended messages to a peer that won't understand them
-    uint64_t nPayloadLength { msg.Size() };
-    int sendVersion { pnode->SendVersionIsSet()? pnode->GetSendVersion() : INIT_PROTO_VERSION };
-    uint64_t maxPayloadLength { CMessageHeader::GetMaxPayloadLength(sendVersion) };
-    if(nPayloadLength > maxPayloadLength)
-    {
-        LogPrint(BCLog::NETMSG, "message %s (%d bytes) cannot be sent because it exceeds max P2P message limit peer=%d\n",
-            SanitizeString(msg.Command().c_str()), nPayloadLength, pnode->id);
-        return;
+bool CConnman::PushMessage(const CNodePtr& pnode, CSerializedNetMsg&& msg) {
+    LOCK(pnode->cs_vSendMsg);  // Original member name
+    
+    if (pnode->CanSend()) {  // Original method name
+        std::vector<uint8_t> headerData;
+        CVectorWriter header(SER_NETWORK, PROTOCOL_VERSION, headerData, 0);
+        msg.Serialize(header);
+        
+        return pnode->PushMessage(std::move(headerData), std::move(msg), StreamType::IMMEDIATE);
     }
-    LogPrint(BCLog::NETMSGVERB, "sending %s (%d bytes) peer=%d\n",
-             SanitizeString(msg.Command().c_str()), nPayloadLength, pnode->id);
-
-    CMessageHeader hdr { *config, msg };
-    std::vector<uint8_t> serializedHeader {};
-    serializedHeader.reserve(hdr.GetLength());
-    CVectorWriter { SER_NETWORK, INIT_PROTO_VERSION, serializedHeader, 0, hdr };
-
-    uint64_t nBytesSent { pnode->PushMessage(std::move(serializedHeader), std::move(msg), stream) };
-    if (nBytesSent > 0)
-    {
-        RecordBytesSent(nBytesSent);
-    }
-}
-
-uint64_t CNode::PushMessage(std::vector<uint8_t>&& serialisedHeader, CSerializedNetMsg&& msg, StreamType stream)
-{
-    uint64_t bytesSent { mAssociation.PushMessage(std::move(serialisedHeader), std::move(msg), stream) };
-    return bytesSent;
+    
+    std::vector<uint8_t> headerData;
+    CVectorWriter header(SER_NETWORK, PROTOCOL_VERSION, headerData, 0);
+    msg.Serialize(header);
+    return pnode->PushMessage(std::move(headerData), std::move(msg), StreamType::GENERAL);
 }
 
 /** Transfer ownership of a stream from one peer's association to another */
@@ -3299,18 +3219,21 @@ CConnman::GetCompactExtraTxns() const {
 /** Enqueue a new transaction for later sending to our peers */
 bool CConnman::EnqueueTransaction(const CTxnSendingDetails& txn)
 {
-    // do not relay minerinfoid transactions
-    if(g_MempoolDatarefTracker->contains(txn.getInfo().GetTxId()))
+    if(g_MempoolDatarefTracker->contains(txn.GetHash()))  // Use GetHash() method
         return false;
 
-    mTxnPropagator->newTransaction(txn);
+    if (mTxnPropagator) {
+        mTxnPropagator->AddTransaction(txn);
+    }
     return true;
 }
 
 /** Remove some transactions from our peers list of new transactions */
-void CConnman::DequeueTransactions(const std::vector<CTransactionRef>& txns)
+void CConnman::DequeueTransactions(const std::vector<CTxnSendingDetails>& txns)
 {
-    mTxnPropagator->removeTransactions(txns);
+    if (mTxnPropagator) {
+        mTxnPropagator->RemoveTransactions(txns);
+    }
 }
 
 bool CConnman::ForNode(NodeId id, std::function<bool(const CNodePtr& pnode)> func) {
@@ -3406,19 +3329,14 @@ bool CConnman::DisableIPv6Multicast() {
 }
 
 bool CConnman::BroadcastInventory(const CInv& inv, bool useMulticast) {
-    // First, broadcast through regular P2P network
-    {
-        LOCK(cs_vNodes);
-        for (const CNodePtr& pnode : vNodes) {
-            if (pnode->fSuccessfullyConnected) {
-                // Replace direct PushInventory call with PushMessage
-                CNetMsgMaker msgMaker(pnode->GetSendVersion());
-                std::vector<CInv> vInv = {inv};
-                PushMessage(pnode, msgMaker.Make(NetMsgType::INV, vInv));
-            }
+    LOCK(cs_vNodes);
+    for (const CNodePtr& pnode : vNodes) {
+        if (pnode->fSuccessfullyConnected) {
+            CNetMsgMaker msgMaker(pnode->GetSendVersion());
+            std::vector<CInv> vInv = {inv};
+            PushMessage(pnode, std::move(msgMaker.Make(NetMsgType::INV, vInv)), StreamType::UNKNOWN);
         }
     }
-
     // Then, if enabled, broadcast through IPv6 multicast
     if (useMulticast && fEnableIPv6Multicast && ipv6MulticastProcessor) {
         return ipv6MulticastProcessor->BroadcastInventory(inv);
@@ -3427,22 +3345,18 @@ bool CConnman::BroadcastInventory(const CInv& inv, bool useMulticast) {
 }
 
 bool CConnman::BroadcastTransaction(const CTransaction& tx, bool useMulticast) {
-    CInv inv(MSG_TX, tx.GetHash());
-    
-    // Regular P2P broadcast
+    CInv inv(MSG_TX, tx.GetId());
     {
         LOCK(cs_vNodes);
         for (const CNodePtr& pnode : vNodes) {
             if (pnode->fSuccessfullyConnected) {
-                // Replace direct calls with PushMessage using CNetMsgMaker
                 CNetMsgMaker msgMaker(pnode->GetSendVersion());
                 std::vector<CInv> vInv = {inv};
-                PushMessage(pnode, msgMaker.Make(NetMsgType::INV, vInv));
-                PushMessage(pnode, msgMaker.Make(NetMsgType::TX, tx));
+                PushMessage(pnode, std::move(msgMaker.Make(NetMsgType::INV, vInv)), StreamType::UNKNOWN);
+                PushMessage(pnode, std::move(msgMaker.Make(NetMsgType::TX, tx)), StreamType::UNKNOWN);
             }
         }
     }
-
     // IPv6 multicast broadcast
     if (useMulticast && fEnableIPv6Multicast && ipv6MulticastProcessor) {
         return ipv6MulticastProcessor->BroadcastTransaction(tx);
@@ -3452,20 +3366,16 @@ bool CConnman::BroadcastTransaction(const CTransaction& tx, bool useMulticast) {
 
 bool CConnman::BroadcastBlock(const CBlock& block, bool useMulticast) {
     CInv inv(MSG_BLOCK, block.GetHash());
-    
-    // Regular P2P broadcast
     {
         LOCK(cs_vNodes);
         for (const CNodePtr& pnode : vNodes) {
             if (pnode->fSuccessfullyConnected) {
-                // Replace direct PushInventory call with PushMessage
                 CNetMsgMaker msgMaker(pnode->GetSendVersion());
                 std::vector<CInv> vInv = {inv};
-                PushMessage(pnode, msgMaker.Make(NetMsgType::INV, vInv));
+                PushMessage(pnode, std::move(msgMaker.Make(NetMsgType::INV, vInv)), StreamType::UNKNOWN);
             }
         }
     }
-
     // IPv6 multicast broadcast
     if (useMulticast && fEnableIPv6Multicast && ipv6MulticastProcessor) {
         return ipv6MulticastProcessor->BroadcastBlock(block);

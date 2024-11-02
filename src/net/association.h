@@ -14,6 +14,11 @@
 
 #include <boost/circular_buffer.hpp>
 
+#include <string>
+#include "netaddress.h"
+#include <vector>
+#include <map>
+
 class AssociationStats;
 class CConnman;
 class CNode;
@@ -167,4 +172,51 @@ class Association
         }
     }
 
+};
+
+struct StreamStats {
+    std::string streamType;
+    int64_t nLastSend{0};
+    int64_t nLastRecv{0};
+    uint64_t nSendBytes{0};
+    uint64_t nSendSize{0};
+    uint64_t nRecvBytes{0};
+    uint64_t nMinuteBytesPerSec{0};
+    uint64_t nSpotBytesPerSec{0};
+    bool fPauseRecv{false};
+    std::map<std::string, uint64_t> mapSendBytesPerMsgCmd;
+    std::map<std::string, uint64_t> mapRecvBytesPerMsgCmd;
+};
+
+struct AssociationStats {
+    std::string assocID;
+    std::vector<StreamStats> streamStats;
+    std::string streamPolicyName;
+    int64_t nLastSend{0};
+    int64_t nLastRecv{0};
+    CAddress addr;
+    uint64_t nAvgBandwidth{0};
+    uint64_t nSendBytes{0};
+    uint64_t nRecvBytes{0};
+    uint64_t nSendSize{0};
+    uint64_t nSendMemory{0};
+    uint64_t nRecvSize{0};
+    std::map<std::string, uint64_t> mapSendBytesPerMsgCmd;
+    std::map<std::string, uint64_t> mapRecvBytesPerMsgCmd;
+};
+
+// Add BanPeer exception class
+class BanPeer : public std::runtime_error {
+public:
+    explicit BanPeer(const std::string& msg) : std::runtime_error(msg) {}
+};
+
+// Update CSerializedNetMsg to include Size() method
+class CSerializedNetMsg {
+public:
+    // ... existing members ...
+
+    size_t Size() const {
+        return data.size();
+    }
 };

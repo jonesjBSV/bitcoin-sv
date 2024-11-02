@@ -859,7 +859,7 @@ if test x$use_upnp != xno; then
   )
 fi
 
-if test x$build_bitcoin_utils$build_bitcoind$use_tests$use_bench = xnonononono; then
+if test x$build_bitcoin_utils$build_bitcoind$use_tests$use_bench = xnononono; then
     use_boost=no
 else
     use_boost=yes

@@ -52,6 +52,8 @@
 #include "net/ipv6_multicast_processor.h"
 #include "threadinterrupt.h"
 
+#include "txn_validation_config.h"  // For PTVTaskScheduleStrategy
+
 // Forward declare CNode
 class CNode;
 
@@ -744,25 +746,7 @@ public:
     bool BroadcastAddress(const CAddress& addr, bool useMulticast = true);
 
     /** Send a message to a node */
-    bool PushMessage(const CNodePtr& pnode, CSerializedNetMsg&& msg)
-    {
-        size_t nMessageSize { msg.Message().size() };
-        LogPrint(BCLog::NET, "sending %s (%d bytes) peer=%d\n",
-                 SanitizeString(msg.Command().c_str()), nMessageSize,
-                 pnode->GetId());
-
-        if(msg.IsHighPriority()) {
-            LOCK(pnode->cs_vSend);
-            if(pnode->CanSendData()) {
-                pnode->PushMessage(std::move(msg), StreamType::IMMEDIATE);
-            }
-        }
-        else {
-            pnode->PushMessage(std::move(msg), StreamType::GENERAL);
-        }
-
-        return true;
-    }
+    bool PushMessage(const CNodePtr& pnode, CSerializedNetMsg&& msg);
 };
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 extern std::unique_ptr<CConnman> g_connman;
@@ -1249,6 +1233,10 @@ public:
     void RunAsyncProcessing(
         std::function<void(std::weak_ptr<CNode>)> function,
         std::shared_ptr<task::CCancellationSource> source);
+
+    CCriticalSection cs_vSendMsg;
+
+    bool CanSend() const;
 };
 
 /**

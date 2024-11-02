@@ -213,3 +213,17 @@ class Stream
 
 using StreamPtr = std::shared_ptr<Stream>;
 using StreamMap = std::map<StreamType, StreamPtr>;
+
+// Remove forward declaration and add full definition
+class StreamStats {
+  public:
+    int64_t nLastSend {0};
+    int64_t nLastRecv {0};
+    uint64_t nSendBytes {0};
+    uint64_t nRecvBytes {0};
+    uint64_t nSendSize {0};
+    uint64_t nSendMemory {0};
+    uint64_t nRecvSize {0};
+    mapMsgCmdSize mapSendBytesPerMsgCmd {};
+    mapMsgCmdSize mapRecvBytesPerMsgCmd {};
+};

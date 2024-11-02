@@ -407,9 +407,10 @@ void BlockDownloadTracker::maybeSetPeerAsAnnouncingHeaderAndIDsNL(NodeId nodeid,
             connman.ForNode(mNodesAnnouncingHeaderAndIDs.front(),
                 [&connman, fAnnounceUsingCMPCTBLOCK, nCMPCTBLOCKVersion](const CNodePtr& pnodeStop)
                 {
+                    CNetMsgMaker msgMaker(pnodeStop->GetSendVersion());
                     connman.PushMessage(pnodeStop,
-                                        CNetMsgMaker(pnodeStop->GetSendVersion())
-                                            .Make(NetMsgType::SENDCMPCT, fAnnounceUsingCMPCTBLOCK, nCMPCTBLOCKVersion));
+                                        std::move(msgMaker.Make(NetMsgType::SENDCMPCT, fAnnounceUsingCMPCTBLOCK, nCMPCTBLOCKVersion)),
+                                        StreamType::UNKNOWN);
                     return true;
                 }
             );
@@ -418,9 +419,10 @@ void BlockDownloadTracker::maybeSetPeerAsAnnouncingHeaderAndIDsNL(NodeId nodeid,
 
         // Add this node using low bandwidth relaying
         fAnnounceUsingCMPCTBLOCK = true;
+        CNetMsgMaker msgMaker(pfrom->GetSendVersion());
         connman.PushMessage(pfrom,
-                            CNetMsgMaker(pfrom->GetSendVersion())
-                                .Make(NetMsgType::SENDCMPCT, fAnnounceUsingCMPCTBLOCK, nCMPCTBLOCKVersion));
+                            std::move(msgMaker.Make(NetMsgType::SENDCMPCT, fAnnounceUsingCMPCTBLOCK, nCMPCTBLOCKVersion)),
+                            StreamType::UNKNOWN);
         mNodesAnnouncingHeaderAndIDs.push_back(pfrom->GetId());
         return true;
     });

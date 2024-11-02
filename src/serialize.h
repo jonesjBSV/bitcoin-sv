@@ -658,9 +658,9 @@ void Unserialize(Stream &os, std::unique_ptr<const T> &p);
  * optional
  */
 template <typename Stream, typename T>
-void Serialize(Stream &os, const std::optional<T> &o);
+void Serialize(Stream& os, const std::optional<T>& o);
 template <typename Stream, typename T>
-void Unserialize(Stream &is, std::optional<T> &o);
+void Unserialize(Stream& is, std::optional<T>& o);
 
 /**
  * If none of the specialized versions above matched, default to calling member
@@ -1174,6 +1174,50 @@ size_t GetSerializeSize(const T &t, int nType, int nVersion = 0) {
 template <typename S, typename T>
 size_t GetSerializeSize(const S &s, const T &t) {
     return (CSizeComputer(s.GetType(), s.GetVersion()) << t).size();
+}
+
+class CSerializedNetMsg {
+public:
+    using PayloadType = std::vector<uint8_t>;
+    
+    CSerializedNetMsg() = default;
+    CSerializedNetMsg(CSerializedNetMsg&&) = default;
+    CSerializedNetMsg& operator=(CSerializedNetMsg&&) = default;
+
+    explicit CSerializedNetMsg(PayloadType&& payload) : data(std::move(payload)) {}
+
+    const PayloadType& GetData() const { return data; }
+    PayloadType& GetData() { return data; }
+
+    template<typename Stream>
+    void Serialize(Stream& s) const {
+        // Serialize payload
+        ::Serialize(s, data);
+    }
+
+private:
+    PayloadType data;
+};
+
+template<typename Stream>
+void Serialize(Stream& os, const CSerializedNetMsg::PayloadType& a) {
+    // Serialize vector size
+    WriteCompactSize(os, a.size());
+    // Write vector contents directly
+    if (!a.empty()) {
+        os.write(reinterpret_cast<const char*>(a.data()), a.size());
+    }
+}
+
+template<typename Stream>
+void Unserialize(Stream& is, CSerializedNetMsg::PayloadType& a) {
+    // Read vector size
+    uint64_t size = ReadCompactSize(is);
+    // Resize vector and read data
+    a.resize(size);
+    if (size > 0) {
+        is.read(reinterpret_cast<char*>(a.data()), size);
+    }
 }
 
 #endif // BITCOIN_SERIALIZE_H
