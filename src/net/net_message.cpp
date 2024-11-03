@@ -20,30 +20,25 @@ uint64_t CNetMessage::Read(const Config& config, const char* pch, uint64_t nByte
                 // Reject oversized messages
                 if(hdr.IsOversized(config))
                 {
-                    throw BanPeer { "Oversized header detected" };
+                    throw std::runtime_error("Oversized header detected");
                 }
 
-                dataBuff.command(hdr.GetCommand());
-                dataBuff.payload_len(hdr.GetPayloadLength());
+                dataBuff.resize(hdr.GetMessageSize());
             }
 
             return numRead;
         }
         catch(const std::exception& e)
         {
-            throw BanPeer { std::string { "Bad header format: " } + e.what() };
+            throw std::runtime_error(std::string("Bad header format: ") + e.what());
         }
     }
 
-    // Read payload data
-    uint64_t nRemaining { hdr.GetPayloadLength() - dataBuff.size() };
-    uint64_t nCopy { std::min(nRemaining, nBytes) };
-    dataBuff.write(pch, nCopy);
-
-    // No need to calculate message hash for extended format msgs
-    if(! hdr.IsExtended())
-    {
-        hasher.Write(reinterpret_cast<const uint8_t*>(pch), nCopy);
+    // Reading payload
+    uint64_t nCopy = std::min(nBytes, hdr.GetPayloadLength() - dataBuff.size());
+    if(nCopy > 0) {
+        dataBuff.write(pch, nCopy);
+        hasher.write(pch, nCopy);
     }
 
     return nCopy;
@@ -56,16 +51,16 @@ uint64_t CNetMessage::Read(const Config& config, const uint8_t* p, uint64_t nByt
 
 const uint256& CNetMessage::GetMessageHash() const
 {
-    assert(Complete());
-    if (data_hash.IsNull()) {
-        hasher.Finalize(data_hash.begin());
+    if(data_hash.IsNull()) {
+        // Create a non-const copy of hasher to call GetHash()
+        CHashWriter tempHasher = hasher;
+        data_hash = tempHasher.GetHash();
     }
     return data_hash;
 }
 
-// Header length + payload length
 uint64_t CNetMessage::GetTotalLength() const
 {
-    return hdr.GetLength() + hdr.GetPayloadLength();
+    return hdr.GetLength();
 }
 

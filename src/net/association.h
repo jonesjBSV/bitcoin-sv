@@ -23,7 +23,6 @@ class AssociationStats;
 class CConnman;
 class CNode;
 class Config; // NOLINT(cppcoreguidelines-virtual-class-destructor)
-class CSerializedNetMsg;
 
 /**
  * An association is a connection between 2 peers which may carry
@@ -174,20 +173,6 @@ class Association
 
 };
 
-struct StreamStats {
-    std::string streamType;
-    int64_t nLastSend{0};
-    int64_t nLastRecv{0};
-    uint64_t nSendBytes{0};
-    uint64_t nSendSize{0};
-    uint64_t nRecvBytes{0};
-    uint64_t nMinuteBytesPerSec{0};
-    uint64_t nSpotBytesPerSec{0};
-    bool fPauseRecv{false};
-    std::map<std::string, uint64_t> mapSendBytesPerMsgCmd;
-    std::map<std::string, uint64_t> mapRecvBytesPerMsgCmd;
-};
-
 struct AssociationStats {
     std::string assocID;
     std::vector<StreamStats> streamStats;
@@ -203,20 +188,30 @@ struct AssociationStats {
     uint64_t nRecvSize{0};
     std::map<std::string, uint64_t> mapSendBytesPerMsgCmd;
     std::map<std::string, uint64_t> mapRecvBytesPerMsgCmd;
+
+    ADD_SERIALIZE_METHODS;
+
+    template <typename Stream, typename Operation>
+    inline void SerializationOp(Stream& s, Operation ser_action) {
+        READWRITE(assocID);
+        READWRITE(streamStats);
+        READWRITE(streamPolicyName);
+        READWRITE(nLastSend);
+        READWRITE(nLastRecv);
+        READWRITE(addr);
+        READWRITE(nAvgBandwidth);
+        READWRITE(nSendBytes);
+        READWRITE(nRecvBytes);
+        READWRITE(nSendSize);
+        READWRITE(nSendMemory);
+        READWRITE(nRecvSize);
+        READWRITE(mapSendBytesPerMsgCmd);
+        READWRITE(mapRecvBytesPerMsgCmd);
+    }
 };
 
 // Add BanPeer exception class
 class BanPeer : public std::runtime_error {
 public:
     explicit BanPeer(const std::string& msg) : std::runtime_error(msg) {}
-};
-
-// Update CSerializedNetMsg to include Size() method
-class CSerializedNetMsg {
-public:
-    // ... existing members ...
-
-    size_t Size() const {
-        return data.size();
-    }
 };

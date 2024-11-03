@@ -94,11 +94,16 @@ public:
     friend bool operator!=(const CNetAddr &a, const CNetAddr &b);
     friend bool operator<(const CNetAddr &a, const CNetAddr &b);
 
-    ADD_SERIALIZE_METHODS
+    template<typename Stream>
+    void Serialize(Stream& s) const {
+        s.write((char*)ip, sizeof(ip));
+        s << scopeId;
+    }
 
-    template <typename Stream, typename Operation>
-    inline void SerializationOp(Stream &s, Operation ser_action) {
-        READWRITE(FLATDATA(ip));
+    template<typename Stream>
+    void Unserialize(Stream& s) {
+        s.read((char*)ip, sizeof(ip));
+        s >> scopeId;
     }
 
     friend class CSubNet;
@@ -131,10 +136,7 @@ public:
     friend bool operator!=(const CSubNet &a, const CSubNet &b);
     friend bool operator<(const CSubNet &a, const CSubNet &b);
 
-    ADD_SERIALIZE_METHODS
-
-    template <typename Stream, typename Operation>
-    inline void SerializationOp(Stream &s, Operation ser_action) {
+    ADD_SERIALIZE_METHODS {
         READWRITE(network);
         READWRITE(FLATDATA(netmask));
         READWRITE(FLATDATA(valid));
@@ -167,14 +169,16 @@ public:
     CService(const struct in6_addr &ipv6Addr, unsigned short port);
     CService(const struct sockaddr_in6 &addr);
 
-    ADD_SERIALIZE_METHODS
+    template<typename Stream>
+    void Serialize(Stream& s) const {
+        CNetAddr::Serialize(s);
+        s << port;
+    }
 
-    template <typename Stream, typename Operation>
-    inline void SerializationOp(Stream &s, Operation ser_action) {
-        READWRITE(FLATDATA(ip));
-        unsigned short portN = htons(port);
-        READWRITE(FLATDATA(portN));
-        if (ser_action.ForRead()) port = ntohs(portN);
+    template<typename Stream>
+    void Unserialize(Stream& s) {
+        CNetAddr::Unserialize(s);
+        s >> port;
     }
 };
 

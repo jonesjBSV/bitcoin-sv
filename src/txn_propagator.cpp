@@ -9,31 +9,31 @@
 constexpr unsigned CTxnPropagator::DEFAULT_RUN_FREQUENCY_MILLIS;
 
 /** Constructor */
-CTxnPropagator::CTxnPropagator()
+CTxnPropagatorImpl::CTxnPropagatorImpl()
 {
     // Configure our running frequency
     auto runFreq { gArgs.GetArg("-txnpropagationfreq", DEFAULT_RUN_FREQUENCY_MILLIS) };
     mRunFrequency = std::chrono::milliseconds {runFreq};
 
     // Launch our threads
-    mNewTxnsThread = std::thread(&CTxnPropagator::threadNewTxnHandler, this);
+    mNewTxnsThread = std::thread(&CTxnPropagatorImpl::threadNewTxnHandler, this);
 }
 
 /** Destructor */
-CTxnPropagator::~CTxnPropagator()
+CTxnPropagatorImpl::~CTxnPropagatorImpl()
 {
-    shutdown();
+    Shutdown();
 }
 
 /** Get the frequency we run */
-std::chrono::milliseconds CTxnPropagator::getRunFrequency() const
+std::chrono::milliseconds CTxnPropagatorImpl::getRunFrequency() const
 {
     std::unique_lock<std::mutex> lock { mNewTxnsMtx };
     return mRunFrequency;
 }
 
 /** Set the frequency we run */
-void CTxnPropagator::setRunFrequency(const std::chrono::milliseconds& freq)
+void CTxnPropagatorImpl::setRunFrequency(const std::chrono::milliseconds& freq)
 {
     std::unique_lock<std::mutex> lock { mNewTxnsMtx };
     mRunFrequency = freq;
@@ -43,14 +43,14 @@ void CTxnPropagator::setRunFrequency(const std::chrono::milliseconds& freq)
 }
 
 /** Get the number of queued new transactions awaiting processing */
-size_t CTxnPropagator::getNewTxnQueueLength() const
+size_t CTxnPropagatorImpl::getNewTxnQueueLength() const
 {
     std::unique_lock<std::mutex> lock { mNewTxnsMtx };
     return mNewTxns.size();
 }
 
 /** Handle a new transaction */
-void CTxnPropagator::newTransaction(const CTxnSendingDetails& txn)
+void CTxnPropagatorImpl::AddTransaction(const CTxnSendingDetails& txn)
 {
     // Add it to the list of new transactions
     std::unique_lock<std::mutex> lock { mNewTxnsMtx };
@@ -58,7 +58,7 @@ void CTxnPropagator::newTransaction(const CTxnSendingDetails& txn)
 }
 
 /** Remove some old transactions */
-void CTxnPropagator::removeTransactions(const std::vector<CTransactionRef>& txns)
+void CTxnPropagatorImpl::RemoveTransactions(const std::vector<CTxnSendingDetails>& txns)
 {
     LogPrint(BCLog::TXNPROP, "Purging %d transactions\n", txns.size());
 
@@ -91,7 +91,7 @@ void CTxnPropagator::removeTransactions(const std::vector<CTransactionRef>& txns
 }
 
 /** Shutdown and clean up */
-void CTxnPropagator::shutdown()
+void CTxnPropagatorImpl::Shutdown()
 {
     // Only shutdown once
     bool expected {true};
@@ -108,7 +108,7 @@ void CTxnPropagator::shutdown()
 }
 
 /** Thread entry point for new transaction queue handling */
-void CTxnPropagator::threadNewTxnHandler() noexcept
+void CTxnPropagatorImpl::threadNewTxnHandler() noexcept
 {
     RenameThread("txnpropagator");
     try
@@ -140,14 +140,16 @@ void CTxnPropagator::threadNewTxnHandler() noexcept
 * Process all new transactions.
 * Already holds mNewTxnsMtx.
 */
-void CTxnPropagator::processNewTransactions()
+void CTxnPropagatorImpl::processNewTransactions()
 {
-
-    auto results { g_connman->ParallelForEachNode([this](const CNodePtr& node) { node->AddTxnsToInventory(mNewTxns); }) };
+    auto results { g_connman->ParallelForEachNode([this](const CNodePtr& node) { 
+        node->AddTxnsToInventory(mNewTxns); 
+    }) };
 
     // Wait for all nodes to finish before clearing mNewTxns
-    for(auto& result : results)
+    for(auto& result : results) {
         result.wait();
+    }
 
     // Clear new transactions list
     mNewTxns.clear();

@@ -1,75 +1,44 @@
-// Copyright (c) 2018-2019 Bitcoin Association
-// Distributed under the Open BSV software license, see the accompanying file LICENSE.
-
-#pragma once
+#ifndef BITCOIN_NET_TXN_PROPAGATOR_H
+#define BITCOIN_NET_TXN_PROPAGATOR_H
 
 #include "txn_sending_details.h"
-
-#include <atomic>
-#include <chrono>
-#include <condition_variable>
-#include <mutex>
-#include <thread>
+#include "serialize.h"
 #include <vector>
+#include <chrono>
 
-/**
-* A class for tracking new transactions that need propagating out to
-* our peers.
-*/
-class CTxnPropagator final
-{
-  public:
+class CTxnSendingDetails {
+private:
+    CInv inv;
+    CTransactionRef tx;
 
-    // Construction/destruction
-    CTxnPropagator();
-    ~CTxnPropagator();
+public:
+    CTxnSendingDetails() = default;
+    CTxnSendingDetails(const CInv& inv_, const CTransactionRef& tx_) 
+        : inv(inv_), tx(tx_) {}
 
-    // Forbid copying/assignment
-    CTxnPropagator(const CTxnPropagator&) = delete;
-    CTxnPropagator(CTxnPropagator&&) = delete;
-    CTxnPropagator& operator=(const CTxnPropagator&) = delete;
-    CTxnPropagator& operator=(CTxnPropagator&&) = delete;
+    const CInv& GetInv() const { return inv; }
+    const CTransactionRef& GetTx() const { return tx; }
 
-    /** Handle a new transaction */
-    void newTransaction(const CTxnSendingDetails& txn);
+    ADD_SERIALIZE_METHODS;
 
-    /** Remove some old transactions */
-    void removeTransactions(const std::vector<CTransactionRef>& txns);
-
-    /** Shutdown and clean up */
-    void shutdown();
-
-    /** Get/set the frequency we run */
-    std::chrono::milliseconds getRunFrequency() const;
-    void setRunFrequency(const std::chrono::milliseconds& freq);
-
-    /** Get the number of queued new transactions awaiting processing */
-    size_t getNewTxnQueueLength() const;
-
-  private:
-
-    /** Thread entry point for new transaction queue handling */
-    void threadNewTxnHandler() noexcept;
-
-    /** Process all newly arrived transactions */
-    void processNewTransactions();
-
-
-    /** List of new transactions that need processing */
-    std::vector<CTxnSendingDetails> mNewTxns {};
-    mutable std::mutex mNewTxnsMtx {};
-
-    /** Our main thread */
-    std::thread mNewTxnsThread {};
-    std::condition_variable mNewTxnsCV {} ;
-
-    /** Flag to indicate we are running */
-    std::atomic<bool> mRunning {true};
-
-    /** Frequency we run (defaults to 1 second) */
-    static constexpr unsigned DEFAULT_RUN_FREQUENCY_MILLIS {250};
-    std::chrono::milliseconds mRunFrequency {DEFAULT_RUN_FREQUENCY_MILLIS};
-
+    template <typename Stream, typename Operation>
+    inline void SerializationOp(Stream& s, Operation ser_action) {
+        READWRITE(inv);
+        READWRITE(REF(*const_cast<CTransaction*>(tx.get())));
+    }
 };
+
+class CTxnPropagator {
+public:
+    virtual ~CTxnPropagator() = default;
+    virtual void Shutdown() = 0;
+    virtual void AddTransaction(const CTxnSendingDetails& txn) = 0;
+    virtual void RemoveTransactions(const std::vector<CTxnSendingDetails>& txns) = 0;
+    virtual std::chrono::milliseconds getRunFrequency() const = 0;
+    virtual void setRunFrequency(const std::chrono::milliseconds& freq) = 0;
+    virtual size_t getNewTxnQueueLength() const = 0;
+};
+
+#endif
 
 

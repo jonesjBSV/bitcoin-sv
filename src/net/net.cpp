@@ -10,6 +10,8 @@
 #include "net/net.h"
 #include "netmessagemaker.h"
 #include "protocol.h"
+#include "net/txn_propagator.h"  // Abstract interface
+#include "../txn_propagator.h"   // Change this line to use relative path to find concrete implementation
 
 #include "addrman.h"
 #include "chainparams.h"
@@ -719,26 +721,26 @@ void CNode::RunAsyncProcessing(
 }
 
 void CNode::copyStats(NodeStats& stats) {
-    mAssociation.CopyStats(stats.associationStats);
-    stats.id = GetId();
-    stats.services = nServices;
-    stats.relayTxes = fRelayTxes;
-    stats.pauseSend = GetPausedForSending();
-    stats.unpauseSend = stats.pauseSend && !GetPausedForSending(true);
-    stats.authConnEstablished = fAuthConnEstablished;
-    stats.timeConnected = nTimeConnected;
-    stats.timeOffset = nTimeOffset;
-    stats.version = nVersion;
-    stats.subVer = cleanSubVer;
-    stats.inbound = fInbound;
-    stats.addnode = fAddnode;
-    stats.startingHeight = nStartingHeight;
-    stats.whitelisted = fWhitelisted;
-    stats.pingTime = ((double(nPingUsecTime)) / 1e6);
-    stats.minPing = ((double(nMinPingUsecTime)) / 1e6);
-    stats.pingWait = ((double(nPingUsecStart)) / 1e6);
-    stats.addr = addrLocal;
-    stats.invQueueSize = mInvList.size();
+    stats.nServices = nServices;
+    stats.fRelayTxes = fRelayTxes;
+    stats.fPauseSend = GetPausedForSending();
+    stats.fUnpauseSend = stats.fPauseSend && !GetPausedForSending(true);
+    stats.fAuthConnEstablished = fAuthConnEstablished;
+    stats.nTimeConnected = nTimeConnected;
+    stats.nTimeOffset = nTimeOffset;
+    stats.nVersion = nVersion;
+    stats.cleanSubVer = cleanSubVer;  // Changed to match NodeStats struct
+    stats.fInbound = fInbound;
+    stats.fAddnode = fAddnode;
+    stats.nStartingHeight = nStartingHeight;
+    stats.fWhitelisted = fWhitelisted;
+    stats.dPingTime = ((double(nPingUsecTime)) / 1e6);
+    stats.dMinPing = ((double(nMinPingUsecTime)) / 1e6);
+    stats.dPingWait = ((double(nPingUsecStart)) / 1e6);
+    CService addrLocal;
+    GetLocal(addrLocal, nullptr);  // Call GetLocal with proper arguments
+    stats.addrLocal = addrLocal;
+    stats.nInvQueueSize = mInvList.size();
 }
 
 /**
@@ -747,16 +749,10 @@ void CNode::copyStats(NodeStats& stats) {
 * and so can be called in parallel.
 */
 void CNode::AddTxnsToInventory(const std::vector<CTxnSendingDetails>& txns) {
+    LOCK(cs_inventory);
     for(const auto& txn : txns) {
-        auto const & info = txn.info;  // Direct member access
-        
-        if(filterInventoryKnown.contains(txn.inv.hash))  // Direct member access
-            continue;
-            
-        if(!mFilter.IsRelevantAndUpdate(*(txn.tx)))  // Direct member access
-            continue;
-            
-        filterInventoryKnown.insert(txn.inv.hash);  // Direct member access
+        // Push the CTxnSendingDetails directly instead of creating a CInv
+        mInvList.push_back(txn);
     }
 }
 
@@ -1361,105 +1357,105 @@ void CConnman::ThreadSocketHandler() {
                 }
             }
         }
+    }
 
-        size_t vNodesSize;
-        {
-            LOCK(cs_vNodes);
-            vNodesSize = vNodes.size();
+    size_t vNodesSize;
+    {
+        LOCK(cs_vNodes);
+        vNodesSize = vNodes.size();
+    }
+    if (vNodesSize != nPrevNodeCount) {
+        nPrevNodeCount = vNodesSize;
+        if (clientInterface) {
+            clientInterface->NotifyNumConnectionsChanged(nPrevNodeCount);
         }
-        if (vNodesSize != nPrevNodeCount) {
-            nPrevNodeCount = vNodesSize;
-            if (clientInterface) {
-                clientInterface->NotifyNumConnectionsChanged(nPrevNodeCount);
+    }
+
+    //
+    // Find which sockets have data to receive
+    //
+    struct timeval timeout;
+    timeout.tv_sec = 0;
+    // Frequency to poll pnode->vSend
+    timeout.tv_usec = 50000;
+
+    fd_set fdsetRecv;
+    fd_set fdsetSend;
+    fd_set fdsetError;
+    FD_ZERO(&fdsetRecv);
+    FD_ZERO(&fdsetSend);
+    FD_ZERO(&fdsetError);
+    SOCKET hSocketMax = 0;
+    bool have_fds = false;
+
+    for (const ListenSocket &hListenSocket : vhListenSocket) {
+        FD_SET(hListenSocket.socket, &fdsetRecv);
+        hSocketMax = std::max(hSocketMax, hListenSocket.socket);
+        have_fds = true;
+    }
+
+    {
+        LOCK(cs_vNodes);
+        for (const CNodePtr& pnode : vNodes) {
+            // Get sockets to select on
+            have_fds |= pnode->SetSocketsForSelect(fdsetRecv, fdsetSend, fdsetError, hSocketMax);
+        }
+    }
+
+    int nSelect = select(have_fds ? hSocketMax + 1 : 0, &fdsetRecv,
+                         &fdsetSend, &fdsetError, &timeout);
+    if (interruptNet) {
+        return;
+    }
+
+    if (nSelect == SOCKET_ERROR) {
+        if (have_fds) {
+            int nErr = WSAGetLastError();
+            LogPrint(BCLog::NETCONN, "socket select error %s\n", NetworkErrorString(nErr));
+            for (SOCKET i = 0; i <= hSocketMax; i++) {
+                FD_SET(i, &fdsetRecv);
             }
         }
-
-        //
-        // Find which sockets have data to receive
-        //
-        struct timeval timeout;
-        timeout.tv_sec = 0;
-        // Frequency to poll pnode->vSend
-        timeout.tv_usec = 50000;
-
-        fd_set fdsetRecv;
-        fd_set fdsetSend;
-        fd_set fdsetError;
-        FD_ZERO(&fdsetRecv);
         FD_ZERO(&fdsetSend);
         FD_ZERO(&fdsetError);
-        SOCKET hSocketMax = 0;
-        bool have_fds = false;
-
-        for (const ListenSocket &hListenSocket : vhListenSocket) {
-            FD_SET(hListenSocket.socket, &fdsetRecv);
-            hSocketMax = std::max(hSocketMax, hListenSocket.socket);
-            have_fds = true;
+        if (!interruptNet.sleep_for(
+                std::chrono::milliseconds(timeout.tv_usec / 1000))) {
+            return;
         }
+    }
 
-        {
-            LOCK(cs_vNodes);
-            for (const CNodePtr& pnode : vNodes) {
-                // Get sockets to select on
-                have_fds |= pnode->SetSocketsForSelect(fdsetRecv, fdsetSend, fdsetError, hSocketMax);
-            }
+    //
+    // Accept new connections
+    //
+    for (const ListenSocket &hListenSocket : vhListenSocket) {
+        if (hListenSocket.socket != INVALID_SOCKET &&
+            FD_ISSET(hListenSocket.socket, &fdsetRecv)) {
+            AcceptConnection(hListenSocket);
         }
+    }
 
-        int nSelect = select(have_fds ? hSocketMax + 1 : 0, &fdsetRecv,
-                             &fdsetSend, &fdsetError, &timeout);
+    //
+    // Service each socket
+    //
+    std::vector<CNodePtr> vNodesCopy;
+    {
+        LOCK(cs_vNodes);
+        vNodesCopy = vNodes;
+    }
+    for (const CNodePtr& pnode : vNodesCopy) {
         if (interruptNet) {
             return;
         }
 
-        if (nSelect == SOCKET_ERROR) {
-            if (have_fds) {
-                int nErr = WSAGetLastError();
-                LogPrint(BCLog::NETCONN, "socket select error %s\n", NetworkErrorString(nErr));
-                for (SOCKET i = 0; i <= hSocketMax; i++) {
-                    FD_SET(i, &fdsetRecv);
-                }
-            }
-            FD_ZERO(&fdsetSend);
-            FD_ZERO(&fdsetError);
-            if (!interruptNet.sleep_for(
-                    std::chrono::milliseconds(timeout.tv_usec / 1000))) {
-                return;
-            }
+        uint64_t bytesRecv {0};
+        uint64_t bytesSent {0};
+        pnode->ServiceSockets(fdsetRecv, fdsetSend, fdsetError, *this, *config, bytesRecv, bytesSent);
+
+        if(bytesRecv > 0) {
+            RecordBytesRecv(bytesRecv);
         }
-
-        //
-        // Accept new connections
-        //
-        for (const ListenSocket &hListenSocket : vhListenSocket) {
-            if (hListenSocket.socket != INVALID_SOCKET &&
-                FD_ISSET(hListenSocket.socket, &fdsetRecv)) {
-                AcceptConnection(hListenSocket);
-            }
-        }
-
-        //
-        // Service each socket
-        //
-        std::vector<CNodePtr> vNodesCopy;
-        {
-            LOCK(cs_vNodes);
-            vNodesCopy = vNodes;
-        }
-        for (const CNodePtr& pnode : vNodesCopy) {
-            if (interruptNet) {
-                return;
-            }
-
-            uint64_t bytesRecv {0};
-            uint64_t bytesSent {0};
-            pnode->ServiceSockets(fdsetRecv, fdsetSend, fdsetError, *this, *config, bytesRecv, bytesSent);
-
-            if(bytesRecv > 0) {
-                RecordBytesRecv(bytesRecv);
-            }
-            if(bytesSent > 0) {
-                RecordBytesSent(bytesSent);
-            }
+        if(bytesSent > 0) {
+            RecordBytesSent(bytesSent);
         }
     }
 }
@@ -2394,7 +2390,7 @@ CConnman::CConnman(
     /** Create an instance of the CTxIdTracker class */
     mTxIdTracker = std::make_shared<CTxIdTracker>();
     /** Create an instance of the CTxnPropagator class */
-    mTxnPropagator = std::make_shared<CTxnPropagator>();
+    mTxnPropagator = std::make_shared<CTxnPropagatorImpl>();  // Use concrete implementation
     /** Create an instance of the CTxnValidator class */
     mTxnValidator =
         std::make_shared<CTxnValidator>(
@@ -2621,7 +2617,9 @@ void CConnman::Stop() {
     mRawTxnValidator = nullptr;
 
    mTxnValidator->shutdown();
-   mTxnPropagator->shutdown();
+   if (mTxnPropagator) {
+       mTxnPropagator->Shutdown();  // Fixed capitalization
+   }
 
     // Close sockets
     for (const CNodePtr& pnode : vNodes) {
@@ -3219,13 +3217,16 @@ CConnman::GetCompactExtraTxns() const {
 /** Enqueue a new transaction for later sending to our peers */
 bool CConnman::EnqueueTransaction(const CTxnSendingDetails& txn)
 {
-    if(g_MempoolDatarefTracker->contains(txn.GetHash()))  // Use GetHash() method
+    // Convert uint256 to TxId for the contains() call
+    if(g_MempoolDatarefTracker->contains(TxId(txn.GetHash()))) {
         return false;
+    }
 
     if (mTxnPropagator) {
         mTxnPropagator->AddTransaction(txn);
+        return true;
     }
-    return true;
+    return false;
 }
 
 /** Remove some transactions from our peers list of new transactions */

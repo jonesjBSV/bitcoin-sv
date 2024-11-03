@@ -136,15 +136,20 @@ public:
     CMessageHeader(const MessageMagic& pchMessageStartIn);
     CMessageHeader(const Config& config, const CSerializedNetMsg& msg);
 
-    uint64_t Read(const char* pch, uint64_t numBytes, msg_buffer&);
+    template<typename Stream>
+    void Serialize(Stream& s) const {
+        s.write(reinterpret_cast<const char*>(pchCommand.data()), pchCommand.size());
+        s << nPayloadLength;
+    }
+
+    template<typename Stream>
+    void Unserialize(Stream& s) {
+        s.read(reinterpret_cast<char*>(pchCommand.data()), pchCommand.size());
+        s >> nPayloadLength;
+    }
 
     std::string GetCommand() const;
-    const MessageMagic& GetMsgStart() const { return pchMessageStart; }
-    const Checksum& GetChecksum() const { return pchChecksum; }
-    uint64_t GetLength() const;
-    uint64_t GetPayloadLength() const;
-    bool IsExtended() const { return extendedFields.has_value(); }
-    bool Complete() const { return complete; }
+    uint64_t GetPayloadLength() const { return nPayloadLength; }
     bool IsValid(const Config& config) const;
     bool IsOversized(const Config& config) const;
 
@@ -592,9 +597,8 @@ public:
 
     **/
     static constexpr uint32_t estimateMaxInvElements(unsigned int maxPayloadLength) {
-
-        return (maxPayloadLength - 8 /* number of elements */) / (4 /* type */ + 32 /* hash size */);
-    } 
+        return maxPayloadLength / MIN_INV_ENTRY_SIZE;
+    }
 
 };
 
@@ -615,10 +619,8 @@ public:
     : numberOfFields{2}, maxRecvPayloadLength{maxRecvPayloadLengthIn}, streamPolicies{streamPoliciesIn}
     {}
 
-    ADD_SERIALIZE_METHODS
-    template <typename Stream, typename Operation>
-    inline void SerializationOp(Stream &s, Operation ser_action) {
-        READWRITECOMPACTSIZE(numberOfFields);
+    ADD_SERIALIZE_METHODS {
+        READWRITE(COMPACTSIZE(numberOfFields));
         if (numberOfFields > 0) {
             READWRITE(maxRecvPayloadLength);
             if(numberOfFields > 1) {
@@ -627,7 +629,6 @@ public:
         } else {
             throw std::ios_base::failure("Invalid deserialization. Number of fields specified in protoconf is equal to 0.");
         }
-        
     }
 };
 

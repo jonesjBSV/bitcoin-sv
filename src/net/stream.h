@@ -226,4 +226,30 @@ class StreamStats {
     uint64_t nRecvSize {0};
     mapMsgCmdSize mapSendBytesPerMsgCmd {};
     mapMsgCmdSize mapRecvBytesPerMsgCmd {};
+
+    template<typename Stream>
+    void Serialize(Stream& s) const {
+        s << nLastSend;
+        s << nLastRecv;
+        s << nSendBytes;
+        s << nRecvBytes;
+        s << nSendSize;
+        s << nSendMemory;
+        s << nRecvSize;
+        s << mapSendBytesPerMsgCmd;
+        s << mapRecvBytesPerMsgCmd;
+    }
+
+    template<typename Stream>
+    void Unserialize(Stream& s) {
+        s >> nLastSend;
+        s >> nLastRecv;
+        s >> nSendBytes;
+        s >> nRecvBytes;
+        s >> nSendSize;
+        s >> nSendMemory;
+        s >> nRecvSize;
+        s >> mapSendBytesPerMsgCmd;
+        s >> mapRecvBytesPerMsgCmd;
+    }
 };
