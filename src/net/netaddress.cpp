@@ -192,12 +192,17 @@ std::string CNetAddr::ToStringIP() const {
     CService serv(*this, 0);
     struct sockaddr_storage sockaddr;
     socklen_t socklen = sizeof(sockaddr);
-    if (serv.GetSockAddr((struct sockaddr *)&sockaddr, &socklen)) {
-        // NOLINTNEXTLINE (cppcoreguidelines-avoid-c-arrays)
+    if (serv.GetSockAddr((struct sockaddr*)&sockaddr, &socklen)) {
         char name[1025] = "";
-        if (!getnameinfo((const struct sockaddr *)&sockaddr, socklen, name,
-                         sizeof(name), nullptr, 0, NI_NUMERICHOST))
+        // Add scope ID to link-local addresses
+        int flags = NI_NUMERICHOST;
+        if (IsRFC4862()) {
+            flags |= NI_NUMERICSCOPE;
+        }
+        if (!getnameinfo((const struct sockaddr*)&sockaddr, socklen, name,
+                        sizeof(name), nullptr, 0, flags)) {
             return std::string(name);
+        }
     }
     if (IsIPv4())
         return strprintf("%u.%u.%u.%u", GetByte(3), GetByte(2), GetByte(1),
@@ -241,11 +246,6 @@ bool CNetAddr::GetInAddr(struct in_addr *pipv4Addr) const {
 
 bool CNetAddr::GetIn6Addr(struct in6_addr *pipv6Addr) const {
     memcpy(pipv6Addr, ip, 16);
-    // Add scope ID handling for link-local addresses
-    if (IsRFC4862() && scopeId != 0) {
-        // Handle scope ID for link-local addresses
-        return true;
-    }
     return true;
 }
 

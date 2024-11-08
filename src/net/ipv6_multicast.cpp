@@ -133,3 +133,35 @@ bool IPv6MulticastManager::ReceiveMulticast(std::vector<unsigned char>& data) {
     data.assign(buffer, buffer + received);
     return true;
 }
+
+bool IPv6MulticastManager::SetAdvancedOptions() {
+    // Enable RFC3542 advanced socket options
+    #ifdef IPV6_RECVHOPLIMIT
+    int on = 1;
+    if (setsockopt(socket_fd, IPPROTO_IPV6, IPV6_RECVHOPLIMIT,
+                   &on, sizeof(on)) < 0) {
+        LogPrintf("Error setting IPV6_RECVHOPLIMIT\n");
+        return false;
+    }
+    #endif
+
+    #ifdef IPV6_RECVTCLASS
+    if (setsockopt(socket_fd, IPPROTO_IPV6, IPV6_RECVTCLASS,
+                   &on, sizeof(on)) < 0) {
+        LogPrintf("Error setting IPV6_RECVTCLASS\n");
+        return false;
+    }
+    #endif
+
+    // Set traffic class for QoS
+    #ifdef IPV6_TCLASS
+    int tclass = 0xc0; // DSCP CS6 - Network control
+    if (setsockopt(socket_fd, IPPROTO_IPV6, IPV6_TCLASS,
+                   &tclass, sizeof(tclass)) < 0) {
+        LogPrintf("Error setting IPV6_TCLASS\n");
+        return false;
+    }
+    #endif
+
+    return true;
+}

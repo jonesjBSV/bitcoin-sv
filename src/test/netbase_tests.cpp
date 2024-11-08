@@ -306,4 +306,28 @@ BOOST_AUTO_TEST_CASE(ipv6_conformance_tests) {
     BOOST_CHECK(ResolveIP("ff05::1:3").IsMulticast());
 }
 
+BOOST_AUTO_TEST_CASE(ipv6_advanced_conformance_tests) {
+    // Test flow label handling
+    CNetAddr addr1 = ResolveIP("2001:db8::1");
+    BOOST_CHECK(addr1.IsValid());
+    BOOST_CHECK(addr1.IsRoutable());
+    
+    // Test traffic class handling
+    CNetAddr addr2 = ResolveIP("2001:db8::2");
+    BOOST_CHECK(addr2.IsValid());
+    
+    // Test multicast scope boundaries
+    BOOST_CHECK(ResolveIP("ff01::1").IsMulticast());  // Interface-local
+    BOOST_CHECK(ResolveIP("ff02::1").IsMulticast());  // Link-local
+    BOOST_CHECK(ResolveIP("ff05::1").IsMulticast());  // Site-local
+    BOOST_CHECK(ResolveIP("ff0e::1").IsMulticast());  // Global
+    
+    // Test address scoping
+    CNetAddr linkLocal1 = ResolveIP("fe80::1234%eth0");
+    CNetAddr linkLocal2 = ResolveIP("fe80::1234%eth1");
+    BOOST_CHECK(linkLocal1.IsRFC4862());
+    BOOST_CHECK(linkLocal2.IsRFC4862());
+    BOOST_CHECK(linkLocal1 != linkLocal2);  // Different scope IDs
+}
+
 BOOST_AUTO_TEST_SUITE_END()

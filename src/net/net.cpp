@@ -3383,3 +3383,30 @@ bool CConnman::BroadcastBlock(const CBlock& block, bool useMulticast) {
     }
     return true;
 }
+
+bool CConnman::SetIPv6FlowLabel(const CService& addrBind, SOCKET& hSocket) {
+    if (addrBind.IsIPv6()) {
+        #ifdef IPV6_FLOWINFO
+        int32_t flowInfo = 0x00030000; // Flow label: testing/debugging value
+        if (setsockopt(hSocket, IPPROTO_IPV6, IPV6_FLOWINFO,
+                      (char*)&flowInfo, sizeof(flowInfo)) < 0) {
+            LogPrintf("Warning: IPv6 socket IPV6_FLOWINFO failed\n");
+            return false;
+        }
+        #endif
+        return true;
+    }
+    return true;
+}
+
+bool CConnman::EnablePMTUD(SOCKET& hSocket) {
+    #ifdef IPV6_MTU_DISCOVER
+    int mtudiscover = IPV6_PMTUDISC_DO;
+    if (setsockopt(hSocket, IPPROTO_IPV6, IPV6_MTU_DISCOVER,
+                   &mtudiscover, sizeof(mtudiscover)) < 0) {
+        LogPrintf("Warning: IPv6 socket IPV6_MTU_DISCOVER failed\n");
+        return false;
+    }
+    #endif
+    return true;
+}
