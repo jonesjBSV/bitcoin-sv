@@ -9,10 +9,10 @@ services:
       - bitcoin_data:/data
       - ./bitcoin.conf:/data/bitcoin.conf:ro
     ports:
-      - "0.0.0.0:18666:18666"    # IPv4 P2P
-      - "[::]:18667:18667"       # Changed IPv6 binding
-      - "0.0.0.0:18665:18665"    # IPv4 RPC
-      - "[::]:18668:18668"       # Changed IPv6 binding
+      - "127.0.0.1:18666:18666"    # IPv4 P2P localhost
+      - "[::1]:18667:18667"        # IPv6 P2P localhost
+      - "127.0.0.1:18665:18665"    # IPv4 RPC localhost
+      - "[::1]:18668:18668"        # IPv6 RPC localhost
     environment:
       - BITCOIN_RPC_USER=${BITCOIN_RPC_USER:-rpcuser}
       - BITCOIN_RPC_PASSWORD=${BITCOIN_RPC_PASSWORD:-rpcpassword}
@@ -26,12 +26,6 @@ services:
           memory: 8G
         reservations:
           memory: 4G
-    sysctls:
-      - net.ipv6.conf.all.disable_ipv6=0
-      - net.ipv6.conf.default.disable_ipv6=0
-      - net.ipv6.conf.all.forwarding=1
-    cap_add:
-      - NET_ADMIN
     networks:
       bitcoin_net:
         ipv6_address: 2001:db8:1::2
@@ -43,6 +37,7 @@ networks:
     driver_opts:
       com.docker.network.enable_ipv6: "true"
     ipam:
+      driver: default
       config:
         - subnet: 2001:db8:1::/64
           gateway: 2001:db8:1::1
