@@ -662,3 +662,23 @@ bool operator<(const CSubNet &a, const CSubNet &b) {
     return (a.network < b.network ||
             (a.network == b.network && memcmp(a.netmask, b.netmask, 16) < 0));
 }
+
+bool CNetAddr::SetFromAddrInfo(const struct addrinfo* ai) {
+    if (!ai || (!ai->ai_addr)) return false;
+
+    switch(ai->ai_family) {
+        case AF_INET:
+            memcpy(ip, pchIPv4, 12);
+            memcpy(ip + 12, &((struct sockaddr_in*)ai->ai_addr)->sin_addr, 4);
+            break;
+        case AF_INET6: {
+            struct sockaddr_in6* s6 = (struct sockaddr_in6*)ai->ai_addr;
+            memcpy(ip, &s6->sin6_addr, 16);
+            scopeId = s6->sin6_scope_id;
+            break;
+        }
+        default:
+            return false;
+    }
+    return true;
+}

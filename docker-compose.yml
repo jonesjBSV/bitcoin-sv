@@ -8,11 +8,10 @@ services:
     volumes:
       - bitcoin_data:/data
     ports:
-      - "8333:8333"      # P2P port IPv4
-      - "8333:8333/udp"  # P2P port UDP for IPv4/IPv6 multicast
-      - "[::]:8333:8333" # P2P port IPv6
-      - "8332:8332"      # RPC port IPv4
-      - "[::]:8332:8332" # RPC port IPv6
+      - "0.0.0.0:8333:8333"      # IPv4 P2P
+      - "[::]:8334:8333"         # IPv6 P2P (using different host port)
+      - "0.0.0.0:8332:8332"      # IPv4 RPC
+      - "[::]:8335:8332"         # IPv6 RPC (using different host port)
     environment:
       - BITCOIN_RPC_USER=${BITCOIN_RPC_USER:-rpcuser}
       - BITCOIN_RPC_PASSWORD=${BITCOIN_RPC_PASSWORD:-rpcpassword}
@@ -36,10 +35,10 @@ networks:
   bitcoin_net:
     enable_ipv6: true
     driver: bridge
+    driver_opts:
+      com.docker.network.enable_ipv6: "true"
     ipam:
-      driver: default
       config:
-        - subnet: 172.16.238.0/24
         - subnet: 2001:db8:1::/64
           gateway: 2001:db8:1::1
 

@@ -2142,120 +2142,38 @@ void CConnman::ThreadMessageHandler()
     }
 }
 
-bool CConnman::BindListenPort(const CService &addrBind, std::string &strError,
-                              bool fWhitelisted) {
-    strError = "";
-    int nOne = 1;
-
-    // Create socket for listening for incoming connections
+bool CConnman::BindListenPort(const CService& addrBind) {
+    SOCKET hListenSocket = INVALID_SOCKET;
+    
     struct sockaddr_storage sockaddr;
     socklen_t len = sizeof(sockaddr);
-    if (!addrBind.GetSockAddr((struct sockaddr *)&sockaddr, &len)) {
-        strError = strprintf("Error: Bind address family for %s not supported",
-                             addrBind.ToString());
-        LogPrintf("%s\n", strError);
-        return false;
-    }
+    int nOne = 1;
 
-    SOCKET hListenSocket = socket(((struct sockaddr *)&sockaddr)->sa_family,
-                                  SOCK_STREAM, IPPROTO_TCP);
-    if (hListenSocket == INVALID_SOCKET) {
-        strError = strprintf("Error: Couldn't open socket for incoming "
-                             "connections (socket returned error %s)",
-                             NetworkErrorString(WSAGetLastError()));
-        LogPrintf("%s\n", strError);
-        return false;
-    }
-    if (!IsSelectableSocket(hListenSocket)) {
-        strError = "Error: Couldn't create a listenable socket for incoming "
-                   "connections";
-        LogPrintf("%s\n", strError);
-        return false;
-    }
+    if (addrBind.GetSockAddr((struct sockaddr*)&sockaddr, &len)) {
+        hListenSocket = socket(sockaddr.ss_family, SOCK_STREAM, IPPROTO_TCP);
+        if (hListenSocket == INVALID_SOCKET) return false;
 
-#ifndef WIN32
-#ifdef SO_NOSIGPIPE
-    // Different way of disabling SIGPIPE on BSD
-    setsockopt(hListenSocket, SOL_SOCKET, SO_NOSIGPIPE, (void *)&nOne,
-               sizeof(int));
-#endif
-    // Allow binding if the port is still in TIME_WAIT state after
-    // the program was closed and restarted.
-    setsockopt(hListenSocket, SOL_SOCKET, SO_REUSEADDR, (void *)&nOne,
-               sizeof(int));
-    // Disable Nagle's algorithm
-    setsockopt(hListenSocket, IPPROTO_TCP, TCP_NODELAY, (void *)&nOne,
-               sizeof(int));
-#else
-    setsockopt(hListenSocket, SOL_SOCKET, SO_REUSEADDR, (const char *)&nOne,
-               sizeof(int));
-    setsockopt(hListenSocket, IPPROTO_TCP, TCP_NODELAY, (const char *)&nOne,
-               sizeof(int));
-#endif
+        #ifdef SO_REUSEADDR
+        setsockopt(hListenSocket, SOL_SOCKET, SO_REUSEADDR, (char*)&nOne, sizeof(int));
+        #endif
 
-    // Set to non-blocking, incoming connections will also inherit this
-    if (!SetSocketNonBlocking(hListenSocket, true)) {
-        strError = strprintf("BindListenPort: Setting listening socket to "
-                             "non-blocking failed, error %s\n",
-                             NetworkErrorString(WSAGetLastError()));
-        LogPrintf("%s\n", strError);
-        return false;
-    }
-
-    // Add proper IPv6 socket options
-    if (addrBind.IsIPv6()) {
+        // Handle dual-stack sockets properly
         #ifdef IPV6_V6ONLY
-        int on = 1;
-        if (setsockopt(hListenSocket, IPPROTO_IPV6, IPV6_V6ONLY, 
-                       (char*)&on, sizeof(on)) < 0) {
-            LogPrintf("Warning: IPv6 socket IPV6_V6ONLY failed\n");
+        if (sockaddr.ss_family == AF_INET6) {
+            setsockopt(hListenSocket, IPPROTO_IPV6, IPV6_V6ONLY, (char*)&nOne, sizeof(int));
         }
         #endif
-        
-        // Add RFC3542 options support
-        #ifdef IPV6_RECVPKTINFO
-        int on = 1;
-        if (setsockopt(hListenSocket, IPPROTO_IPV6, IPV6_RECVPKTINFO,
-                       (char*)&on, sizeof(on)) < 0) {
-            LogPrintf("Warning: IPv6 socket IPV6_RECVPKTINFO failed\n");
+
+        // Set advanced IPv6 socket options
+        if (addrBind.IsIPv6()) {
+            SetIPv6SocketOptions(hListenSocket);
         }
-        #endif
-    }
 
-    if (::bind(hListenSocket, (struct sockaddr *)&sockaddr, len) ==
-        SOCKET_ERROR) {
-        int nErr = WSAGetLastError();
-        if (nErr == WSAEADDRINUSE) {
-            strError = strprintf(_("Unable to bind to %s on this computer. %s "
-                                   "is probably already running."),
-                                 addrBind.ToString(), _(PACKAGE_NAME));
-        } else {
-            strError = strprintf(_("Unable to bind to %s on this computer "
-                                   "(bind returned error %s)"),
-                                 addrBind.ToString(), NetworkErrorString(nErr));
+        if (bind(hListenSocket, (struct sockaddr*)&sockaddr, len) == SOCKET_ERROR) {
+            CloseSocket(hListenSocket);
+            return false;
         }
-        LogPrintf("%s\n", strError);
-        CloseSocket(hListenSocket);
-        return false;
     }
-    LogPrintf("Bound to %s\n", addrBind.ToString());
-
-    // Listen for incoming connections
-    if (listen(hListenSocket, SOMAXCONN) == SOCKET_ERROR) {
-        strError = strprintf(_("Error: Listening for incoming connections "
-                               "failed (listen returned error %s)"),
-                             NetworkErrorString(WSAGetLastError()));
-        LogPrintf("%s\n", strError);
-        CloseSocket(hListenSocket);
-        return false;
-    }
-
-    vhListenSocket.push_back(ListenSocket(hListenSocket, fWhitelisted));
-
-    if (addrBind.IsRoutable() && fDiscover && !fWhitelisted) {
-        AddLocal(addrBind, LOCAL_BIND);
-    }
-
     return true;
 }
 
@@ -3408,5 +3326,33 @@ bool CConnman::EnablePMTUD(SOCKET& hSocket) {
         return false;
     }
     #endif
+    return true;
+}
+
+bool CConnman::SetIPv6SocketOptions(SOCKET& hSocket) {
+    #ifdef IPV6_RECVPKTINFO
+    int on = 1;
+    if (setsockopt(hSocket, IPPROTO_IPV6, IPV6_RECVPKTINFO, 
+                   (char*)&on, sizeof(on)) < 0) {
+        LogPrintf("Warning: IPv6 socket IPV6_RECVPKTINFO failed\n");
+    }
+    #endif
+
+    #ifdef IPV6_RECVHOPLIMIT
+    if (setsockopt(hSocket, IPPROTO_IPV6, IPV6_RECVHOPLIMIT,
+                   (char*)&on, sizeof(on)) < 0) {
+        LogPrintf("Warning: IPv6 socket IPV6_RECVHOPLIMIT failed\n");
+    }
+    #endif
+
+    // Enable Path MTU Discovery
+    #ifdef IPV6_MTU_DISCOVER
+    int mtudiscover = IPV6_PMTUDISC_DO;
+    if (setsockopt(hSocket, IPPROTO_IPV6, IPV6_MTU_DISCOVER,
+                   &mtudiscover, sizeof(mtudiscover)) < 0) {
+        LogPrintf("Warning: IPv6 socket IPV6_MTU_DISCOVER failed\n");
+    }
+    #endif
+
     return true;
 }
