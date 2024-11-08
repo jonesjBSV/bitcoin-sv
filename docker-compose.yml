@@ -7,6 +7,7 @@ services:
       dockerfile: Dockerfile
     volumes:
       - bitcoin_data:/data
+      - ./bitcoin.conf:/data/bitcoin.conf:ro
     ports:
       - "0.0.0.0:8333:8333"      # IPv4 P2P
       - "[::]:8334:8333"         # IPv6 P2P (using different host port)
@@ -15,6 +16,10 @@ services:
     environment:
       - BITCOIN_RPC_USER=${BITCOIN_RPC_USER:-rpcuser}
       - BITCOIN_RPC_PASSWORD=${BITCOIN_RPC_PASSWORD:-rpcpassword}
+    command:
+      - bitcoind
+      - -conf=/data/bitcoin.conf
+      - -datadir=/data
     deploy:
       resources:
         limits:
@@ -26,7 +31,7 @@ services:
       - net.ipv6.conf.default.disable_ipv6=0
       - net.ipv6.conf.all.forwarding=1
     cap_add:
-      - NET_ADMIN  # Required for IPv6 configuration
+      - NET_ADMIN
     networks:
       bitcoin_net:
         ipv6_address: 2001:db8:1::2
