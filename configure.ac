@@ -859,7 +859,7 @@ if test x$use_upnp != xno; then
   )
 fi
 
-if test x$build_bitcoin_utils$build_bitcoind$use_tests$use_bench = xnonononono; then
+if test x$build_bitcoin_utils$build_bitcoind$use_tests$use_bench = xnononono; then
     use_boost=no
 else
     use_boost=yes
@@ -1408,3 +1408,16 @@ echo "  CXXFLAGS          = $CXXFLAGS"
 echo "  LDFLAGS           = $LDFLAGS"
 
 echo
+
+# Add after the existing options
+AC_ARG_ENABLE([ipv6-multicast],
+    [AS_HELP_STRING([--enable-ipv6-multicast],
+                    [enable IPv6 multicast support (default is yes)])],
+    [enable_ipv6_multicast=$enableval],
+    [enable_ipv6_multicast=yes])
+
+AM_CONDITIONAL([ENABLE_IPV6_MULTICAST], [test "x$enable_ipv6_multicast" = "xyes"])
+
+if test "x$enable_ipv6_multicast" = "xyes"; then
+    AC_DEFINE([ENABLE_IPV6_MULTICAST], [1], [Define to 1 to enable IPv6 multicast support])
+fi

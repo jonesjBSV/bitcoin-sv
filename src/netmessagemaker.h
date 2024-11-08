@@ -8,38 +8,30 @@
 
 #include "net/net.h"
 #include "serialize.h"
-
-#include <vector>
+#include "net/serialized_net_msg.h"
 
 class CNetMsgMaker {
 public:
-    CNetMsgMaker(int nVersionIn) : nVersion(nVersionIn) {}
+    explicit CNetMsgMaker(int nVersionIn) : nVersion(nVersionIn) {}
 
     template <typename... Args>
-    CSerializedNetMsg Make(int nFlags, CSerializedNetMsg::PayloadType payloadType, std::string sCommand,
-                           Args &&... args) const {
-        std::vector<uint8_t> data;
-        data.reserve(ser_size(args...));
+    CSerializedNetMsg Make(int nFlags, CSerializedNetMsg::Type payloadType, 
+                          std::string sCommand, Args&&... args) const {
+        CSerializedNetMsg::PayloadType data;
+        size_t nSize = GetSerializeSize(std::forward<Args>(args)..., nVersion | nFlags);
+        data.reserve(nSize);
         CVectorWriter{SER_NETWORK, nFlags | nVersion, data, 0,
-                      std::forward<Args>(args)...};
+                     std::forward<Args>(args)...};
         return {std::move(sCommand), payloadType, std::move(data)};
     }
 
     template <typename... Args>
-    CSerializedNetMsg Make(std::string sCommand, Args &&... args) const {
-        return Make(0, CSerializedNetMsg::PayloadType::UNKNOWN, std::move(sCommand), std::forward<Args>(args)...);
+    CSerializedNetMsg Make(std::string sCommand, Args&&... args) const {
+        return Make(0, CSerializedNetMsg::Type::UNKNOWN, std::move(sCommand),
+                   std::forward<Args>(args)...);
     }
 
-    template <typename... Args>
-    CSerializedNetMsg Make(CSerializedNetMsg::PayloadType payloadType, std::string sCommand,
-                           Args &&... args) const {
-        return Make(0, payloadType, std::move(sCommand), std::forward<Args>(args)...);
-    }
-
-    int GetVersion() const
-    {
-        return nVersion;
-    }
+    int GetVersion() const { return nVersion; }
 
 private:
     const int nVersion;

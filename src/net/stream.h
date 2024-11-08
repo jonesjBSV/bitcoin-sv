@@ -18,6 +18,7 @@
 #include <memory>
 #include <optional>
 #include <vector>
+#include <map>
 
 #include <boost/circular_buffer.hpp>
 
@@ -45,6 +46,7 @@ enum class StreamType : uint8_t
     DATA2,
     DATA3,
     DATA4,
+    IMMEDIATE,
 
     MAX_STREAM_TYPE
 };
@@ -212,3 +214,43 @@ class Stream
 
 using StreamPtr = std::shared_ptr<Stream>;
 using StreamMap = std::map<StreamType, StreamPtr>;
+
+// Remove forward declaration and add full definition
+class StreamStats {
+  public:
+    int64_t nLastSend {0};
+    int64_t nLastRecv {0};
+    uint64_t nSendBytes {0};
+    uint64_t nRecvBytes {0};
+    uint64_t nSendSize {0};
+    uint64_t nSendMemory {0};
+    uint64_t nRecvSize {0};
+    std::map<std::string, uint64_t> mapSendBytesPerMsgCmd {};
+    std::map<std::string, uint64_t> mapRecvBytesPerMsgCmd {};
+
+    template<typename Stream>
+    void Serialize(Stream& s) const {
+        s << nLastSend;
+        s << nLastRecv;
+        s << nSendBytes;
+        s << nRecvBytes;
+        s << nSendSize;
+        s << nSendMemory;
+        s << nRecvSize;
+        s << mapSendBytesPerMsgCmd;
+        s << mapRecvBytesPerMsgCmd;
+    }
+
+    template<typename Stream>
+    void Unserialize(Stream& s) {
+        s >> nLastSend;
+        s >> nLastRecv;
+        s >> nSendBytes;
+        s >> nRecvBytes;
+        s >> nSendSize;
+        s >> nSendMemory;
+        s >> nRecvSize;
+        s >> mapSendBytesPerMsgCmd;
+        s >> mapRecvBytesPerMsgCmd;
+    }
+};

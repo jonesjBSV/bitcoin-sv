@@ -56,17 +56,20 @@ public:
     COutPoint() : txid(), n(-1) {}
     COutPoint(uint256 txidIn, uint32_t nIn) : txid(TxId(txidIn)), n(nIn) {}
 
-    ADD_SERIALIZE_METHODS
+    template<typename Stream>
+    void Serialize(Stream& s) const {
+        s << txid;
+        s << n;
+    }
 
-    template <typename Stream, typename Operation>
-    inline void SerializationOp(Stream &s, Operation ser_action) {
-        READWRITE(txid);
-        READWRITE(n);
+    template<typename Stream>
+    void Unserialize(Stream& s) {
+        s >> txid;
+        s >> n;
     }
 
     bool IsNull() const { return txid.IsNull() && n == uint32_t(-1); }
-
-    const TxId &GetTxId() const { return txid; }
+    const TxId& GetTxId() const { return txid; }
     uint32_t GetN() const { return n; }
 
     friend bool operator<(const COutPoint &a, const COutPoint &b) {
@@ -138,25 +141,23 @@ public:
      */
     static inline constexpr int SEQUENCE_LOCKTIME_GRANULARITY = 9;
 
-    // NOLINTNEXTLINE(cppcoreguidelines-prefer-member-initializer)
-    CTxIn() { nSequence = SEQUENCE_FINAL; }
-
-    explicit CTxIn(COutPoint prevoutIn, CScript scriptSigIn = CScript(),
-                   uint32_t nSequenceIn = SEQUENCE_FINAL)
-        // NOLINTNEXTLINE(performance-unnecessary-value-param)
+    CTxIn() : prevout(), scriptSig(), nSequence(std::numeric_limits<uint32_t>::max()) {}
+    explicit CTxIn(COutPoint prevoutIn, CScript scriptSigIn=CScript(),
+                  uint32_t nSequenceIn=std::numeric_limits<uint32_t>::max())
         : prevout(prevoutIn), scriptSig(scriptSigIn), nSequence(nSequenceIn) {}
-    CTxIn(TxId prevTxId, uint32_t nOut, CScript scriptSigIn = CScript(),
-          uint32_t nSequenceIn = SEQUENCE_FINAL)
-        // NOLINTNEXTLINE(performance-unnecessary-value-param)
-        : CTxIn(COutPoint(prevTxId, nOut), scriptSigIn, nSequenceIn) {}
 
-    ADD_SERIALIZE_METHODS
+    template<typename Stream>
+    void Serialize(Stream& s) const {
+        s << prevout;
+        s << scriptSig;
+        s << nSequence;
+    }
 
-    template <typename Stream, typename Operation>
-    inline void SerializationOp(Stream &s, Operation ser_action) {
-        READWRITE(prevout);
-        READWRITE(scriptSig);
-        READWRITE(nSequence);
+    template<typename Stream>
+    void Unserialize(Stream& s) {
+        s >> prevout;
+        s >> scriptSig;
+        s >> nSequence;
     }
 
     friend bool operator==(const CTxIn &a, const CTxIn &b) {
@@ -167,6 +168,10 @@ public:
     friend bool operator!=(const CTxIn &a, const CTxIn &b) { return !(a == b); }
 
     std::string ToString() const;
+
+    size_t ser_size() const {
+        return ser_size(prevout) + ser_size(scriptSig) + sizeof(nSequence);
+    }
 };
 
 size_t ser_size(const CTxIn&);
@@ -182,19 +187,20 @@ public:
     Amount nValue;
     CScript scriptPubKey;
 
-    CTxOut() { SetNull(); }
+    CTxOut() : nValue(-1), scriptPubKey() {}
+    CTxOut(const Amount& nValueIn, CScript scriptPubKeyIn)
+        : nValue(nValueIn), scriptPubKey(std::move(scriptPubKeyIn)) {}
 
-    // NOLINTNEXTLINE(performance-unnecessary-value-param)
-    CTxOut(Amount nValueIn, CScript scriptPubKeyIn)
-    // NOLINTNEXTLINE(performance-unnecessary-value-param)
-        : nValue(nValueIn), scriptPubKey(scriptPubKeyIn) {}
+    template<typename Stream>
+    void Serialize(Stream& s) const {
+        s << nValue;
+        s << scriptPubKey;
+    }
 
-    ADD_SERIALIZE_METHODS
-
-    template <typename Stream, typename Operation>
-    inline void SerializationOp(Stream &s, Operation ser_action) {
-        READWRITE(nValue);
-        READWRITE(scriptPubKey);
+    template<typename Stream>
+    void Unserialize(Stream& s) {
+        s >> nValue;
+        s >> scriptPubKey;
     }
 
     void SetNull() {
@@ -225,9 +231,13 @@ public:
     }
 
     std::string ToString() const;
+
+    size_t ser_size() const {
+        return sizeof(nValue) + ser_size(scriptPubKey);
+    }
 };
 
-size_t ser_size(const CTxOut&); 
+size_t ser_size(const CTxOut&);
 
 class CMutableTransaction;
 

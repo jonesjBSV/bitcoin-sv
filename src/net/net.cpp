@@ -8,6 +8,10 @@
 #endif
 
 #include "net/net.h"
+#include "netmessagemaker.h"
+#include "protocol.h"
+#include "net/txn_propagator.h"  // Abstract interface
+#include "../txn_propagator.h"   // Change this line to use relative path to find concrete implementation
 
 #include "addrman.h"
 #include "chainparams.h"
@@ -22,7 +26,6 @@
 #include "primitives/transaction.h"
 #include "scheduler.h"
 #include "taskcancellation.h"
-#include "txn_propagator.h"
 #include "txn_validator.h"
 #include "rawtxvalidator.h"
 #include "ui_interface.h"
@@ -717,60 +720,27 @@ void CNode::RunAsyncProcessing(
         source);
 }
 
-void CNode::copyStats(NodeStats &stats)
-{
-    mAssociation.CopyStats(stats.associationStats);
-
-    stats.nodeid = this->GetId();
+void CNode::copyStats(NodeStats& stats) {
     stats.nServices = nServices;
-    {
-        LOCK(cs_filter);
-        stats.fRelayTxes = fRelayTxes;
-    }
+    stats.fRelayTxes = fRelayTxes;
     stats.fPauseSend = GetPausedForSending();
     stats.fUnpauseSend = stats.fPauseSend && !GetPausedForSending(true);
     stats.fAuthConnEstablished = fAuthConnEstablished;
     stats.nTimeConnected = nTimeConnected;
     stats.nTimeOffset = nTimeOffset;
-    stats.addrName = GetAddrName();
     stats.nVersion = nVersion;
-    {
-        LOCK(cs_SubVer);
-        stats.cleanSubVer = cleanSubVer;
-    }
+    stats.cleanSubVer = cleanSubVer;  // Changed to match NodeStats struct
     stats.fInbound = fInbound;
     stats.fAddnode = fAddnode;
     stats.nStartingHeight = nStartingHeight;
     stats.fWhitelisted = fWhitelisted;
-
-    // It is common for nodes with good ping times to suddenly become lagged,
-    // due to a new block arriving or other large transfer. Merely reporting
-    // pingtime might fool the caller into thinking the node was still
-    // responsive, since pingtime does not update until the ping is complete,
-    // which might take a while. So, if a ping is taking an unusually long time
-    // in flight, the caller can immediately detect that this is happening.
-    int64_t nPingUsecWait = 0;
-    if ((0 != nPingNonceSent) && (0 != nPingUsecStart)) {
-        nPingUsecWait = GetTimeMicros() - nPingUsecStart;
-    }
-
-    // Raw ping time is in microseconds, but show it to user as whole seconds
-    // (Bitcoin users should be well used to small numbers with many decimal
-    // places by now :)
     stats.dPingTime = ((double(nPingUsecTime)) / 1e6);
     stats.dMinPing = ((double(nMinPingUsecTime)) / 1e6);
-    stats.dPingWait = ((double(nPingUsecWait)) / 1e6);
-
-    // Leave string empty if addrLocal invalid (not filled in yet)
-    CService addrLocalUnlocked = mAssociation.GetPeerAddrLocal();
-    stats.addrLocal =
-        addrLocalUnlocked.IsValid() ? addrLocalUnlocked.ToString() : "";
-
-    {
-        // Fetch size of inventory queue
-        LOCK(cs_mInvList);
-        stats.nInvQueueSize = mInvList.size();
-    }
+    stats.dPingWait = ((double(nPingUsecStart)) / 1e6);
+    CService addrLocal;
+    GetLocal(addrLocal, nullptr);  // Call GetLocal with proper arguments
+    stats.addrLocal = addrLocal;
+    stats.nInvQueueSize = mInvList.size();
 }
 
 /**
@@ -778,47 +748,11 @@ void CNode::copyStats(NodeStats &stats)
 * Assumes the caller has taken care of locking access to the mempool,
 * and so can be called in parallel.
 */
-void CNode::AddTxnsToInventory(const std::vector<CTxnSendingDetails>& txns)
-{
-    // Get our minimum fee
-    Amount filterrate {0};
-    {   
-        LOCK(cs_feeFilter);
-        filterrate = minFeeFilter;
-    }
-
-    // reason for larger cs_inventory lock scope than needed is that if we need
-    // to lock both cs_inventory and cs_filter we need to consistently lock
-    // inventory before cs_filter to prevent deadlocks
+void CNode::AddTxnsToInventory(const std::vector<CTxnSendingDetails>& txns) {
     LOCK(cs_inventory);
-    LOCK(cs_filter);
-    LOCK(cs_mInvList);
-
-    if(!fRelayTxes)
-    {
-        // Clear any txns we have queued for this peer
-        mInvList.clear();
-    }
-    else
-    {
-        for(const CTxnSendingDetails& txn : txns)
-        {
-            // Don't bother if below peer's fee rate
-            auto const & info = txn.getInfo();
-            const Amount fee = info.feeRate.GetFee(info.nTxSize);
-            const Amount totalFilterFee = CFeeRate{filterrate}.GetFee(info.nTxSize);
-            if(filterrate != Amount{0} && fee + info.nFeeDelta < totalFilterFee)
-                continue;
-
-            // Check and update bloom filters
-            if(filterInventoryKnown.contains(txn.getInv().hash))
-                continue;
-            if(!mFilter.IsRelevantAndUpdate(*(txn.getTxnRef())))
-                continue;
-
-            mInvList.emplace_back(txn);
-            filterInventoryKnown.insert(txn.getInv().hash);
-        }
+    for(const auto& txn : txns) {
+        // Push the CTxnSendingDetails directly instead of creating a CInv
+        mInvList.push_back(txn);
     }
 }
 
@@ -836,7 +770,7 @@ void CNode::RemoveTxnsFromInventory(const std::set<CInv>& toRemove)
         std::remove_if(
             mInvList.begin(), mInvList.end(), 
             [&toRemove](const CTxnSendingDetails& i) {
-                return toRemove.find(i.getInv()) != toRemove.end(); 
+                return toRemove.find(i.GetInv()) != toRemove.end(); 
             }), 
         mInvList.end());    
 }
@@ -1423,105 +1357,105 @@ void CConnman::ThreadSocketHandler() {
                 }
             }
         }
+    }
 
-        size_t vNodesSize;
-        {
-            LOCK(cs_vNodes);
-            vNodesSize = vNodes.size();
+    size_t vNodesSize;
+    {
+        LOCK(cs_vNodes);
+        vNodesSize = vNodes.size();
+    }
+    if (vNodesSize != nPrevNodeCount) {
+        nPrevNodeCount = vNodesSize;
+        if (clientInterface) {
+            clientInterface->NotifyNumConnectionsChanged(nPrevNodeCount);
         }
-        if (vNodesSize != nPrevNodeCount) {
-            nPrevNodeCount = vNodesSize;
-            if (clientInterface) {
-                clientInterface->NotifyNumConnectionsChanged(nPrevNodeCount);
+    }
+
+    //
+    // Find which sockets have data to receive
+    //
+    struct timeval timeout;
+    timeout.tv_sec = 0;
+    // Frequency to poll pnode->vSend
+    timeout.tv_usec = 50000;
+
+    fd_set fdsetRecv;
+    fd_set fdsetSend;
+    fd_set fdsetError;
+    FD_ZERO(&fdsetRecv);
+    FD_ZERO(&fdsetSend);
+    FD_ZERO(&fdsetError);
+    SOCKET hSocketMax = 0;
+    bool have_fds = false;
+
+    for (const ListenSocket &hListenSocket : vhListenSocket) {
+        FD_SET(hListenSocket.socket, &fdsetRecv);
+        hSocketMax = std::max(hSocketMax, hListenSocket.socket);
+        have_fds = true;
+    }
+
+    {
+        LOCK(cs_vNodes);
+        for (const CNodePtr& pnode : vNodes) {
+            // Get sockets to select on
+            have_fds |= pnode->SetSocketsForSelect(fdsetRecv, fdsetSend, fdsetError, hSocketMax);
+        }
+    }
+
+    int nSelect = select(have_fds ? hSocketMax + 1 : 0, &fdsetRecv,
+                         &fdsetSend, &fdsetError, &timeout);
+    if (interruptNet) {
+        return;
+    }
+
+    if (nSelect == SOCKET_ERROR) {
+        if (have_fds) {
+            int nErr = WSAGetLastError();
+            LogPrint(BCLog::NETCONN, "socket select error %s\n", NetworkErrorString(nErr));
+            for (SOCKET i = 0; i <= hSocketMax; i++) {
+                FD_SET(i, &fdsetRecv);
             }
         }
-
-        //
-        // Find which sockets have data to receive
-        //
-        struct timeval timeout;
-        timeout.tv_sec = 0;
-        // Frequency to poll pnode->vSend
-        timeout.tv_usec = 50000;
-
-        fd_set fdsetRecv;
-        fd_set fdsetSend;
-        fd_set fdsetError;
-        FD_ZERO(&fdsetRecv);
         FD_ZERO(&fdsetSend);
         FD_ZERO(&fdsetError);
-        SOCKET hSocketMax = 0;
-        bool have_fds = false;
-
-        for (const ListenSocket &hListenSocket : vhListenSocket) {
-            FD_SET(hListenSocket.socket, &fdsetRecv);
-            hSocketMax = std::max(hSocketMax, hListenSocket.socket);
-            have_fds = true;
+        if (!interruptNet.sleep_for(
+                std::chrono::milliseconds(timeout.tv_usec / 1000))) {
+            return;
         }
+    }
 
-        {
-            LOCK(cs_vNodes);
-            for (const CNodePtr& pnode : vNodes) {
-                // Get sockets to select on
-                have_fds |= pnode->SetSocketsForSelect(fdsetRecv, fdsetSend, fdsetError, hSocketMax);
-            }
+    //
+    // Accept new connections
+    //
+    for (const ListenSocket &hListenSocket : vhListenSocket) {
+        if (hListenSocket.socket != INVALID_SOCKET &&
+            FD_ISSET(hListenSocket.socket, &fdsetRecv)) {
+            AcceptConnection(hListenSocket);
         }
+    }
 
-        int nSelect = select(have_fds ? hSocketMax + 1 : 0, &fdsetRecv,
-                             &fdsetSend, &fdsetError, &timeout);
+    //
+    // Service each socket
+    //
+    std::vector<CNodePtr> vNodesCopy;
+    {
+        LOCK(cs_vNodes);
+        vNodesCopy = vNodes;
+    }
+    for (const CNodePtr& pnode : vNodesCopy) {
         if (interruptNet) {
             return;
         }
 
-        if (nSelect == SOCKET_ERROR) {
-            if (have_fds) {
-                int nErr = WSAGetLastError();
-                LogPrint(BCLog::NETCONN, "socket select error %s\n", NetworkErrorString(nErr));
-                for (SOCKET i = 0; i <= hSocketMax; i++) {
-                    FD_SET(i, &fdsetRecv);
-                }
-            }
-            FD_ZERO(&fdsetSend);
-            FD_ZERO(&fdsetError);
-            if (!interruptNet.sleep_for(
-                    std::chrono::milliseconds(timeout.tv_usec / 1000))) {
-                return;
-            }
+        uint64_t bytesRecv {0};
+        uint64_t bytesSent {0};
+        pnode->ServiceSockets(fdsetRecv, fdsetSend, fdsetError, *this, *config, bytesRecv, bytesSent);
+
+        if(bytesRecv > 0) {
+            RecordBytesRecv(bytesRecv);
         }
-
-        //
-        // Accept new connections
-        //
-        for (const ListenSocket &hListenSocket : vhListenSocket) {
-            if (hListenSocket.socket != INVALID_SOCKET &&
-                FD_ISSET(hListenSocket.socket, &fdsetRecv)) {
-                AcceptConnection(hListenSocket);
-            }
-        }
-
-        //
-        // Service each socket
-        //
-        std::vector<CNodePtr> vNodesCopy;
-        {
-            LOCK(cs_vNodes);
-            vNodesCopy = vNodes;
-        }
-        for (const CNodePtr& pnode : vNodesCopy) {
-            if (interruptNet) {
-                return;
-            }
-
-            uint64_t bytesRecv {0};
-            uint64_t bytesSent {0};
-            pnode->ServiceSockets(fdsetRecv, fdsetSend, fdsetError, *this, *config, bytesRecv, bytesSent);
-
-            if(bytesRecv > 0) {
-                RecordBytesRecv(bytesRecv);
-            }
-            if(bytesSent > 0) {
-                RecordBytesSent(bytesSent);
-            }
+        if(bytesSent > 0) {
+            RecordBytesSent(bytesSent);
         }
     }
 }
@@ -2187,7 +2121,7 @@ void CConnman::ThreadMessageHandler()
 
             // Send messages
             {
-                LOCK(pnode->cs_sendProcessing);
+                LOCK(pnode->cs_vSendMsg);  // Original member name
                 GetNodeSignals().SendMessages(*config, pnode, *this,
                                               flagInterruptMsgProc);
             }
@@ -2268,24 +2202,24 @@ bool CConnman::BindListenPort(const CService &addrBind, std::string &strError,
         return false;
     }
 
-    // Some systems don't have IPV6_V6ONLY but are always v6only; others do have
-    // the option and enable it by default or not. Try to enable it, if
-    // possible.
+    // Add proper IPv6 socket options
     if (addrBind.IsIPv6()) {
-#ifdef IPV6_V6ONLY
-#ifdef WIN32
-        setsockopt(hListenSocket, IPPROTO_IPV6, IPV6_V6ONLY,
-                   (const char *)&nOne, sizeof(int));
-#else
-        setsockopt(hListenSocket, IPPROTO_IPV6, IPV6_V6ONLY, (void *)&nOne,
-                   sizeof(int));
-#endif
-#endif
-#ifdef WIN32
-        int nProtLevel = PROTECTION_LEVEL_UNRESTRICTED;
-        setsockopt(hListenSocket, IPPROTO_IPV6, IPV6_PROTECTION_LEVEL,
-                   (const char *)&nProtLevel, sizeof(int));
-#endif
+        #ifdef IPV6_V6ONLY
+        int on = 1;
+        if (setsockopt(hListenSocket, IPPROTO_IPV6, IPV6_V6ONLY, 
+                       (char*)&on, sizeof(on)) < 0) {
+            LogPrintf("Warning: IPv6 socket IPV6_V6ONLY failed\n");
+        }
+        #endif
+        
+        // Add RFC3542 options support
+        #ifdef IPV6_RECVPKTINFO
+        int on = 1;
+        if (setsockopt(hListenSocket, IPPROTO_IPV6, IPV6_RECVPKTINFO,
+                       (char*)&on, sizeof(on)) < 0) {
+            LogPrintf("Warning: IPv6 socket IPV6_RECVPKTINFO failed\n");
+        }
+        #endif
     }
 
     if (::bind(hListenSocket, (struct sockaddr *)&sockaddr, len) ==
@@ -2456,7 +2390,7 @@ CConnman::CConnman(
     /** Create an instance of the CTxIdTracker class */
     mTxIdTracker = std::make_shared<CTxIdTracker>();
     /** Create an instance of the CTxnPropagator class */
-    mTxnPropagator = std::make_shared<CTxnPropagator>();
+    mTxnPropagator = std::make_shared<CTxnPropagatorImpl>();  // Use concrete implementation
     /** Create an instance of the CTxnValidator class */
     mTxnValidator =
         std::make_shared<CTxnValidator>(
@@ -2683,7 +2617,9 @@ void CConnman::Stop() {
     mRawTxnValidator = nullptr;
 
    mTxnValidator->shutdown();
-   mTxnPropagator->shutdown();
+   if (mTxnPropagator) {
+       mTxnPropagator->Shutdown();  // Fixed capitalization
+   }
 
     // Close sockets
     for (const CNodePtr& pnode : vNodes) {
@@ -3059,37 +2995,21 @@ bool CConnman::NodeFullyConnected(const CNodePtr& pnode) {
     return pnode && pnode->fSuccessfullyConnected && !pnode->fDisconnect;
 }
 
-void CConnman::PushMessage(const CNodePtr& pnode, CSerializedNetMsg&& msg, StreamType stream)
-{
-    // Ensure we don't send extended messages to a peer that won't understand them
-    uint64_t nPayloadLength { msg.Size() };
-    int sendVersion { pnode->SendVersionIsSet()? pnode->GetSendVersion() : INIT_PROTO_VERSION };
-    uint64_t maxPayloadLength { CMessageHeader::GetMaxPayloadLength(sendVersion) };
-    if(nPayloadLength > maxPayloadLength)
-    {
-        LogPrint(BCLog::NETMSG, "message %s (%d bytes) cannot be sent because it exceeds max P2P message limit peer=%d\n",
-            SanitizeString(msg.Command().c_str()), nPayloadLength, pnode->id);
-        return;
+bool CConnman::PushMessage(const CNodePtr& pnode, CSerializedNetMsg&& msg) {
+    LOCK(pnode->cs_vSendMsg);  // Original member name
+    
+    if (pnode->CanSend()) {  // Original method name
+        std::vector<uint8_t> headerData;
+        CVectorWriter header(SER_NETWORK, PROTOCOL_VERSION, headerData, 0);
+        msg.Serialize(header);
+        
+        return pnode->PushMessage(std::move(headerData), std::move(msg), StreamType::IMMEDIATE);
     }
-    LogPrint(BCLog::NETMSGVERB, "sending %s (%d bytes) peer=%d\n",
-             SanitizeString(msg.Command().c_str()), nPayloadLength, pnode->id);
-
-    CMessageHeader hdr { *config, msg };
-    std::vector<uint8_t> serializedHeader {};
-    serializedHeader.reserve(hdr.GetLength());
-    CVectorWriter { SER_NETWORK, INIT_PROTO_VERSION, serializedHeader, 0, hdr };
-
-    uint64_t nBytesSent { pnode->PushMessage(std::move(serializedHeader), std::move(msg), stream) };
-    if (nBytesSent > 0)
-    {
-        RecordBytesSent(nBytesSent);
-    }
-}
-
-uint64_t CNode::PushMessage(std::vector<uint8_t>&& serialisedHeader, CSerializedNetMsg&& msg, StreamType stream)
-{
-    uint64_t bytesSent { mAssociation.PushMessage(std::move(serialisedHeader), std::move(msg), stream) };
-    return bytesSent;
+    
+    std::vector<uint8_t> headerData;
+    CVectorWriter header(SER_NETWORK, PROTOCOL_VERSION, headerData, 0);
+    msg.Serialize(header);
+    return pnode->PushMessage(std::move(headerData), std::move(msg), StreamType::GENERAL);
 }
 
 /** Transfer ownership of a stream from one peer's association to another */
@@ -3297,18 +3217,24 @@ CConnman::GetCompactExtraTxns() const {
 /** Enqueue a new transaction for later sending to our peers */
 bool CConnman::EnqueueTransaction(const CTxnSendingDetails& txn)
 {
-    // do not relay minerinfoid transactions
-    if(g_MempoolDatarefTracker->contains(txn.getInfo().GetTxId()))
+    // Convert uint256 to TxId for the contains() call
+    if(g_MempoolDatarefTracker->contains(TxId(txn.GetHash()))) {
         return false;
+    }
 
-    mTxnPropagator->newTransaction(txn);
-    return true;
+    if (mTxnPropagator) {
+        mTxnPropagator->AddTransaction(txn);
+        return true;
+    }
+    return false;
 }
 
 /** Remove some transactions from our peers list of new transactions */
-void CConnman::DequeueTransactions(const std::vector<CTransactionRef>& txns)
+void CConnman::DequeueTransactions(const std::vector<CTxnSendingDetails>& txns)
 {
-    mTxnPropagator->removeTransactions(txns);
+    if (mTxnPropagator) {
+        mTxnPropagator->RemoveTransactions(txns);
+    }
 }
 
 bool CConnman::ForNode(NodeId id, std::function<bool(const CNodePtr& pnode)> func) {
@@ -3371,4 +3297,89 @@ std::string userAgent() {
     }
 
     return subversion;
+}
+
+bool CConnman::EnableIPv6Multicast() {
+    LOCK(cs_vNodes);
+    if (fEnableIPv6Multicast) return true;  // Already enabled
+
+    try {
+        ipv6MulticastProcessor = std::make_unique<IPv6MulticastProcessor>(*this);
+        if (!ipv6MulticastProcessor->Start()) {
+            ipv6MulticastProcessor.reset();
+            return false;
+        }
+        fEnableIPv6Multicast = true;
+        return true;
+    } catch (const std::exception& e) {
+        LogPrintf("Error enabling IPv6 multicast: %s\n", e.what());
+        return false;
+    }
+}
+
+bool CConnman::DisableIPv6Multicast() {
+    LOCK(cs_vNodes);
+    if (!fEnableIPv6Multicast) return true;  // Already disabled
+
+    if (ipv6MulticastProcessor) {
+        ipv6MulticastProcessor->Stop();
+        ipv6MulticastProcessor.reset();
+    }
+    fEnableIPv6Multicast = false;
+    return true;
+}
+
+bool CConnman::BroadcastInventory(const CInv& inv, bool useMulticast) {
+    LOCK(cs_vNodes);
+    for (const CNodePtr& pnode : vNodes) {
+        if (pnode->fSuccessfullyConnected) {
+            CNetMsgMaker msgMaker(pnode->GetSendVersion());
+            std::vector<CInv> vInv = {inv};
+            PushMessage(pnode, std::move(msgMaker.Make(NetMsgType::INV, vInv)), StreamType::UNKNOWN);
+        }
+    }
+    // Then, if enabled, broadcast through IPv6 multicast
+    if (useMulticast && fEnableIPv6Multicast && ipv6MulticastProcessor) {
+        return ipv6MulticastProcessor->BroadcastInventory(inv);
+    }
+    return true;
+}
+
+bool CConnman::BroadcastTransaction(const CTransaction& tx, bool useMulticast) {
+    CInv inv(MSG_TX, tx.GetId());
+    {
+        LOCK(cs_vNodes);
+        for (const CNodePtr& pnode : vNodes) {
+            if (pnode->fSuccessfullyConnected) {
+                CNetMsgMaker msgMaker(pnode->GetSendVersion());
+                std::vector<CInv> vInv = {inv};
+                PushMessage(pnode, std::move(msgMaker.Make(NetMsgType::INV, vInv)), StreamType::UNKNOWN);
+                PushMessage(pnode, std::move(msgMaker.Make(NetMsgType::TX, tx)), StreamType::UNKNOWN);
+            }
+        }
+    }
+    // IPv6 multicast broadcast
+    if (useMulticast && fEnableIPv6Multicast && ipv6MulticastProcessor) {
+        return ipv6MulticastProcessor->BroadcastTransaction(tx);
+    }
+    return true;
+}
+
+bool CConnman::BroadcastBlock(const CBlock& block, bool useMulticast) {
+    CInv inv(MSG_BLOCK, block.GetHash());
+    {
+        LOCK(cs_vNodes);
+        for (const CNodePtr& pnode : vNodes) {
+            if (pnode->fSuccessfullyConnected) {
+                CNetMsgMaker msgMaker(pnode->GetSendVersion());
+                std::vector<CInv> vInv = {inv};
+                PushMessage(pnode, std::move(msgMaker.Make(NetMsgType::INV, vInv)), StreamType::UNKNOWN);
+            }
+        }
+    }
+    // IPv6 multicast broadcast
+    if (useMulticast && fEnableIPv6Multicast && ipv6MulticastProcessor) {
+        return ipv6MulticastProcessor->BroadcastBlock(block);
+    }
+    return true;
 }

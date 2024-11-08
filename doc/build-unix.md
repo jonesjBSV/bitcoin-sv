@@ -51,6 +51,22 @@ Optional dependencies:
  libzmq3     | ZMQ notification | Optional, allows generating ZMQ notifications (requires ZMQ version >= 4.3.2)
  tcmalloc    | Memory allocator | Alternative memory allocator (may be helpful for nodes on the STN)
 
+### IPv6 Multicast Support
+
+To enable IPv6 multicast support, ensure your system meets these requirements:
+
+1. A modern Linux kernel with IPv6 multicast support
+2. Network interfaces configured for IPv6 multicast
+3. Proper firewall rules allowing IPv6 multicast traffic
+
+#### Building with IPv6 Multicast Support
+
+Configure with the following option:
+
+```bash
+./configure --enable-ipv6-multicast
+```
+
 ### Toolchain dependency build instructions
 
 #### GCC version

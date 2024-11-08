@@ -244,11 +244,7 @@ private:
 // extracts a transaction hash from CTxMempoolEntry or CTransactionRef
 struct mempoolentry_txid {
     typedef uint256 result_type;
-    result_type operator()(const CTxMemPoolEntry &entry) const {
-        return entry.GetTxId();
-    }
-
-    result_type operator()(const CTransactionRef &tx) const {
+    result_type operator()(const std::shared_ptr<const CTransaction>& tx) const {
         return tx->GetId();
     }
 };
@@ -470,20 +466,18 @@ private:
 private:
     // FIXME: DEPRECATED - ultimately this will be changed or removed
     typedef boost::multi_index_container<
-        CTxMemPoolEntry, boost::multi_index::indexed_by<
-                             // sorted by txid
-                             boost::multi_index::hashed_unique<
-                                 boost::multi_index::tag<transaction_id>,
-                                 mempoolentry_txid, SaltedTxidHasher>,
-                             // sorted by entry time
-                             boost::multi_index::ordered_non_unique<
-                                 boost::multi_index::tag<entry_time>,
-                                 boost::multi_index::identity<CTxMemPoolEntry>,
-                                 CompareTxMemPoolEntryByEntryTime>,
-                             // arranged by insertion order
-                             boost::multi_index::sequenced<
-                                 boost::multi_index::tag<insertion_order>>>>
-        indexed_transaction_set;
+        std::shared_ptr<const CTransaction>,
+        boost::multi_index::indexed_by<
+            boost::multi_index::hashed_unique<
+                boost::multi_index::tag<txid_index>,
+                mempoolentry_txid,
+                SaltedTxidHasher
+            >,
+            boost::multi_index::sequenced<
+                boost::multi_index::tag<insertion_order>
+            >
+        >
+    > indexed_transaction_set;
 
     // FIXME: DEPRECATED - ultimately this will be changed or removed
     mutable std::shared_mutex smtx;
@@ -496,14 +490,14 @@ private:
 
     struct CompareIteratorByHash {
         bool operator()(const txiter &a, const txiter &b) const {
-            return a->GetTxId() < b->GetTxId();
+            return a->GetId() < b->GetId();
         }
     };
 
     class SaltedTxiterHasher : private SaltedTxidHasher {
     public:
         size_t operator()(const txiter& entry) const {
-            return SaltedTxidHasher::operator()(entry->GetTxId());
+            return SaltedTxidHasher::operator()(entry->GetId());
         }
     };
 
@@ -1367,7 +1361,7 @@ public:
 /**
  * ICoinsView that brings transactions from a memorypool into view.
  * If a transaction is in mempool this class will return an unspent coin even
- *
+
  * - If GetCoin/HaveCoin finds a coin  it will always return it in subsequent calls.
  * - If GetCoin/HaveCoin does NOT return a coin on first call it can still return
  *   them on later calls - coins can be added to mempool when transaction are added).

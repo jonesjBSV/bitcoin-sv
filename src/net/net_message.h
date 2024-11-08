@@ -4,65 +4,55 @@
 // Copyright (c) 2020-2021 Bitcoin Association
 // Distributed under the Open BSV software license, see the accompanying file LICENSE.
 
-#pragma once
+#ifndef BITCOIN_NET_NET_MESSAGE_H
+#define BITCOIN_NET_NET_MESSAGE_H
 
-#include <hash.h>
-#include <protocol.h>
-#include <streams.h>
-#include "msg_buffer.h"
+#include "hash.h"
+#include "net/net_message_header.h"
+#include "serialize.h"
+#include "streams.h"
+#include "uint256.h"
 
-#include <stdexcept>
+#include <array>
+#include <cstdint>
+#include <string>
+
+class Config;
 
 class CNetMessage {
 private:
-    mutable CHash256 hasher {};
-    mutable uint256 data_hash {};
-
-    // Incoming data stream
-    msg_buffer dataBuff;
-
-    // Message header
+    mutable CHash256 hasher;
+    mutable uint256 data_hash;
     CMessageHeader hdr;
-
-    // Time (in microseconds) of message receipt.
-    int64_t nTime {0};
+    CDataStream dataBuff;
 
 public:
-    CNetMessage(const CMessageHeader::MessageMagic& pchMessageStartIn, int nTypeIn, int nVersionIn)
-    : dataBuff { nTypeIn, nVersionIn },
-      hdr { pchMessageStartIn }
-    {
-    }
-
-    bool Complete() const {
-        if (!hdr.Complete()) {
-            return false;
-        }
-
-        return (hdr.GetPayloadLength() == dataBuff.size());
-    }
-
-    const uint256& GetMessageHash() const;
-    const CMessageHeader& GetHeader() const { return hdr; }
-    int64_t GetTime() const { return nTime; }
-    void SetTime(int64_t time) { nTime = time; }
-    msg_buffer& GetData() { return dataBuff; }
-    uint64_t GetTotalLength() const;
-
-    void SetVersion(int nVersionIn) {
-        dataBuff.SetVersion(nVersionIn);
-    }
+    CNetMessage(const CMessageHeader::MessageMagic& pchMessageStartIn)
+        : hdr(pchMessageStartIn), dataBuff(SER_NETWORK, INIT_PROTO_VERSION) {}
 
     uint64_t Read(const Config& config, const char* pch, uint64_t nBytes);
-    uint64_t Read(const Config&, const uint8_t* pch, uint64_t nBytes);
+    uint64_t Read(const Config& config, const uint8_t* pch, uint64_t nBytes);
+
+    const CMessageHeader& GetHeader() const { return hdr; }
+    bool Complete() const { return hdr.Complete() && dataBuff.size() == hdr.GetMessageSize(); }
+    const uint256& GetMessageHash() const;
+    uint64_t GetTotalLength() const;
+    CDataStream& GetData() { return dataBuff; }
+
+    template<typename Stream>
+    void Serialize(Stream& s) const {
+        s << hdr;
+        s << dataBuff;
+        s << data_hash;
+    }
+
+    template<typename Stream>
+    void Unserialize(Stream& s) {
+        s >> hdr;
+        s >> dataBuff;
+        s >> data_hash;
+    }
 };
 
-/**
- * Exception type that gets thrown if we should ban a peer.
- */
-class BanPeer : public std::runtime_error
-{
-  public:
-    explicit BanPeer(const std::string& msg) : std::runtime_error{msg} {}
-};
+#endif // BITCOIN_NET_NET_MESSAGE_H
 

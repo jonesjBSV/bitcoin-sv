@@ -33,8 +33,31 @@ public:
     }
 };
 
+// Vector serialization helper for CTxnSendingDetails
+template<typename Stream>
+void SerializeVector(Stream& s, const std::vector<CTxnSendingDetails>& v) {
+    WriteCompactSize(s, v.size());
+    for(const auto& item : v) {
+        ::Serialize(s, item);
+    }
+}
+
+template<typename Stream>
+void UnserializeVector(Stream& s, std::vector<CTxnSendingDetails>& v) {
+    v.clear();
+    size_t size = ReadCompactSize(s);
+    v.reserve(size);
+    for(size_t i = 0; i < size; i++) {
+        CTxnSendingDetails item;
+        ::Unserialize(s, item);
+        v.push_back(item);
+    }
+}
+
 class CTxnPropagator {
 public:
+    static constexpr unsigned DEFAULT_RUN_FREQUENCY_MILLIS {1000};
+
     virtual ~CTxnPropagator() = default;
     virtual void Shutdown() = 0;
     virtual void AddTransaction(const CTxnSendingDetails& txn) = 0;
@@ -44,6 +67,4 @@ public:
     virtual size_t getNewTxnQueueLength() const = 0;
 };
 
-#endif // BITCOIN_NET_TXN_PROPAGATOR_H
-
-
+#endif // BITCOIN_NET_TXN_PROPAGATOR_H 

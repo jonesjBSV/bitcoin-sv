@@ -292,4 +292,18 @@ BOOST_AUTO_TEST_CASE(netbase_getgroup) {
         Vec8({NET_IPV6, 32, 1, 32, 1}));
 }
 
+BOOST_AUTO_TEST_CASE(ipv6_conformance_tests) {
+    // Test link-local address handling
+    BOOST_CHECK(ResolveIP("fe80::1234:5678:9abc:def0%eth0").IsRFC4862());
+    
+    // Test scope ID handling
+    CNetAddr addr1 = ResolveIP("fe80::1234%eth0");
+    CNetAddr addr2 = ResolveIP("fe80::1234%eth1");
+    BOOST_CHECK(addr1 != addr2); // Different scope IDs
+    
+    // Test multicast address handling
+    BOOST_CHECK(ResolveIP("ff02::1").IsMulticast());
+    BOOST_CHECK(ResolveIP("ff05::1:3").IsMulticast());
+}
+
 BOOST_AUTO_TEST_SUITE_END()

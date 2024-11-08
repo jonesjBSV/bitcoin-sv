@@ -1,29 +1,105 @@
-// Copyright (c) 2020 Bitcoin Association
-// Distributed under the Open BSV software license, see the accompanying file LICENSE.
+#ifndef BITCOIN_NET_NET_TYPES_H
+#define BITCOIN_NET_NET_TYPES_H
 
-#pragma once
-
-#include <map>
+#include "netaddress.h"
+#include "protocol.h"
+#include "serialize.h"
+#include "uint256.h"
+#include <atomic>
+#include <cstdint>
+#include <memory>
 #include <string>
 
-/** Some common type alises used throughout the networking code */
+class CNode;
+using CNodePtr = std::shared_ptr<CNode>;
 
-// A node ID
-using NodeId = int64_t;
+/** Different types of network connections we support */
+enum class ConnectionType : uint8_t {
+    NONE = 0,
+    INBOUND = 1,
+    OUTBOUND = 2,
+    MANUAL = 3,
+    FEELER = 4,
+    BLOCK_RELAY = 5
+};
 
-// Command, total bytes
-using mapMsgCmdSize = std::map<std::string, uint64_t>;
+/** Information about a peer */
+class CNodeStats {
+public:
+    NodeId nodeid;
+    ServiceFlags nServices;
+    bool fRelayTxes;
+    int64_t nLastSend;
+    int64_t nLastRecv;
+    int64_t nTimeConnected;
+    int64_t nTimeOffset;
+    std::string addrName;
+    int nVersion;
+    std::string cleanSubVer;
+    bool fInbound;
+    bool fAddnode;
+    int nStartingHeight;
+    uint64_t nSendBytes;
+    uint64_t nRecvBytes;
+    bool fWhitelisted;
+    double dPingTime;
+    double dPingWait;
+    double dMinPing;
+    Amount minFeeFilter;
+    std::string addrLocal;
+    CAddress addr;
 
-// Average bandwidth, number of items average is calculated over
-using AverageBandwidth = std::pair<uint64_t, size_t>;
+    template<typename Stream>
+    void Serialize(Stream& s) const {
+        s << nodeid;
+        s << nServices;
+        s << fRelayTxes;
+        s << nLastSend;
+        s << nLastRecv;
+        s << nTimeConnected;
+        s << nTimeOffset;
+        s << addrName;
+        s << nVersion;
+        s << cleanSubVer;
+        s << fInbound;
+        s << fAddnode;
+        s << nStartingHeight;
+        s << nSendBytes;
+        s << nRecvBytes;
+        s << fWhitelisted;
+        s << dPingTime;
+        s << dPingWait;
+        s << dMinPing;
+        s << minFeeFilter;
+        s << addrLocal;
+        s << addr;
+    }
 
-/** Some constants */
+    template<typename Stream>
+    void Unserialize(Stream& s) {
+        s >> nodeid;
+        s >> nServices;
+        s >> fRelayTxes;
+        s >> nLastSend;
+        s >> nLastRecv;
+        s >> nTimeConnected;
+        s >> nTimeOffset;
+        s >> addrName;
+        s >> nVersion;
+        s >> cleanSubVer;
+        s >> fInbound;
+        s >> fAddnode;
+        s >> nStartingHeight;
+        s >> nSendBytes;
+        s >> nRecvBytes;
+        s >> fWhitelisted;
+        s >> dPingTime;
+        s >> dPingWait;
+        s >> dMinPing;
+        s >> minFeeFilter;
+        s >> addrLocal;
+        s >> addr;
+    }
+};
 
-// Peer average bandwidth measurement interval
-static const unsigned PEER_AVG_BANDWIDTH_CALC_FREQUENCY_SECS = 5;
-
-// Reject codes for stream errors
-static const uint8_t REJECT_STREAM_SETUP = 0x60;
-
-// Maximum length for a serialised StreamPolicy name
-static const size_t MAX_STREAM_POLICY_NAME_LENGTH = 64;
+#endif // BITCOIN_NET_NET_TYPES_H

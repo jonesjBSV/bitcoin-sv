@@ -18,97 +18,74 @@ class CBlockStreamReader;
 // Dumb helper to handle CTransaction compression at serialize-time
 struct TransactionCompressor {
 private:
-    CTransactionRef &tx;
+    CTransactionRef tx;
 
 public:
-    TransactionCompressor(CTransactionRef &txIn) : tx(txIn) {}
+    TransactionCompressor(const CTransactionRef& tx) : tx(tx) {}
+    
+    template<typename Stream>
+    void Serialize(Stream& s) const {
+        CompressedTransaction txn(*tx);
+        s << txn;
+    }
 
-    ADD_SERIALIZE_METHODS
-
-    template <typename Stream, typename Operation>
-    inline void SerializationOp(Stream &s, Operation ser_action) {
-        // TODO: Compress tx encoding
-        READWRITE(tx);
+    template<typename Stream>
+    void Unserialize(Stream& s) {
+        CompressedTransaction txn;
+        s >> txn;
+        tx = txn.GetTx();
     }
 };
 
 class BlockTransactionsRequest {
-public:
-    // A BlockTransactionsRequest message
+private:
     uint256 blockhash;
-    std::vector<uint32_t> indices;
+    std::vector<uint16_t> indexes;
 
-    ADD_SERIALIZE_METHODS
+public:
+    template<typename Stream>
+    void Serialize(Stream& s) const {
+        s << blockhash;
+        WriteCompactSize(s, indexes.size());
+        for(const uint16_t& index : indexes) {
+            s << index;
+        }
+    }
 
-    template <typename Stream, typename Operation>
-    inline void SerializationOp(Stream &s, Operation ser_action) {
-        READWRITE(blockhash);
-        uint64_t indices_size = uint64_t(indices.size());
-        READWRITE(COMPACTSIZE(indices_size));
-        if (ser_action.ForRead()) {
-            size_t i = 0;
-            while (indices.size() < indices_size) {
-                indices.resize(
-                    std::min(uint64_t(1000 + indices.size()), indices_size));
-                for (; i < indices.size(); i++) {
-                    uint64_t n = 0;
-                    READWRITE(COMPACTSIZE(n));
-                    if (n > std::numeric_limits<uint32_t>::max()) {
-                        throw std::ios_base::failure(
-                            "index overflowed 32 bits");
-                    }
-                    indices[i] = n;
-                }
-            }
-
-            uint32_t offset = 0;
-            for (auto &index : indices) {
-                if (uint64_t(index) + uint64_t(offset) >
-                    std::numeric_limits<uint32_t>::max()) {
-                    throw std::ios_base::failure("indices overflowed 32 bits");
-                }
-                index = index + offset;
-                offset = index + 1;
-            }
-        } else {
-            for (size_t i = 0; i < indices.size(); i++) {
-                uint64_t index =
-                    indices[i] - (i == 0 ? 0 : (indices[i - 1] + 1));
-                READWRITE(COMPACTSIZE(index));
-            }
+    template<typename Stream>
+    void Unserialize(Stream& s) {
+        s >> blockhash;
+        uint64_t indexes_size = ReadCompactSize(s);
+        indexes.resize(indexes_size);
+        for(uint16_t& index : indexes) {
+            s >> index;
         }
     }
 };
 
 class BlockTransactions {
-public:
-    // A BlockTransactions message
+private:
     uint256 blockhash;
     std::vector<CTransactionRef> txn;
 
-    BlockTransactions() {}
-    BlockTransactions(const BlockTransactionsRequest &req)
-        : blockhash(req.blockhash), txn(req.indices.size()) {}
+public:
+    template<typename Stream>
+    void Serialize(Stream& s) const {
+        s << blockhash;
+        WriteCompactSize(s, txn.size());
+        for(const auto& tx : txn) {
+            s << *tx;
+        }
+    }
 
-    ADD_SERIALIZE_METHODS
-
-    template <typename Stream, typename Operation>
-    inline void SerializationOp(Stream &s, Operation ser_action) {
-        READWRITE(blockhash);
-        uint64_t txn_size = (uint64_t)txn.size();
-        READWRITE(COMPACTSIZE(txn_size));
-        if (ser_action.ForRead()) {
-            size_t i = 0;
-            while (txn.size() < txn_size) {
-                txn.resize(std::min(uint64_t(1000 + txn.size()), txn_size));
-                for (; i < txn.size(); i++) {
-                    READWRITE(REF(TransactionCompressor(txn[i])));
-                }
-            }
-        } else {
-            for (size_t i = 0; i < txn.size(); i++) {
-                READWRITE(REF(TransactionCompressor(txn[i])));
-            }
+    template<typename Stream>
+    void Unserialize(Stream& s) {
+        s >> blockhash;
+        uint64_t txn_size = ReadCompactSize(s);
+        txn.resize(txn_size);
+        for(size_t i = 0; i < txn_size; i++) {
+            txn[i] = MakeTransactionRef();
+            s >> *txn[i];
         }
     }
 };
@@ -127,12 +104,7 @@ struct PrefilledTransaction {
 
     template <typename Stream, typename Operation>
     inline void SerializationOp(Stream &s, Operation ser_action) {
-        uint64_t n = index;
-        READWRITE(COMPACTSIZE(n));
-        if (n > std::numeric_limits<uint32_t>::max()) {
-            throw std::ios_base::failure("index overflowed 32-bits");
-        }
-        index = n;
+        READWRITE(COMPACTSIZE(index));
         READWRITE(REF(TransactionCompressor(tx)));
     }
 };
@@ -184,39 +156,17 @@ public:
     inline void SerializationOp(Stream &s, Operation ser_action) {
         READWRITE(header);
         READWRITE(nonce);
-
-        uint64_t shorttxids_size = (uint64_t)shorttxids.size();
-        READWRITE(COMPACTSIZE(shorttxids_size));
-        if (ser_action.ForRead()) {
-            size_t i = 0;
-            while (shorttxids.size() < shorttxids_size) {
-                shorttxids.resize(std::min(uint64_t(1000 + shorttxids.size()),
-                                           shorttxids_size));
-                for (; i < shorttxids.size(); i++) {
-                    uint32_t lsb = 0;
-                    uint16_t msb = 0;
-                    READWRITE(lsb);
-                    READWRITE(msb);
-                    shorttxids[i] = (uint64_t(msb) << 32) | uint64_t(lsb);
-                    static_assert(
-                        SHORTTXIDS_LENGTH == 6,
-                        "shorttxids serialization assumes 6-byte shorttxids");
-                }
-            }
-        } else {
-            for (uint64_t shortid : shorttxids) {
-                uint32_t lsb = shortid & 0xffffffff;
-                uint16_t msb = (shortid >> 32) & 0xffff;
-                READWRITE(lsb);
-                READWRITE(msb);
-            }
+        size_t shorttxids_size = shorttxids.size();
+        READWRITE(VARINT(shorttxids_size));
+        shorttxids.resize(shorttxids_size);
+        for (size_t i = 0; i < shorttxids.size(); i++) {
+            uint32_t lsb = shorttxids[i] & 0xffffffff;
+            uint16_t msb = (shorttxids[i] >> 32) & 0xffff;
+            READWRITE(lsb);
+            READWRITE(msb);
+            shorttxids[i] = (uint64_t(msb) << 32) | uint64_t(lsb);
         }
-
         READWRITE(prefilledtxn);
-
-        if (ser_action.ForRead()) {
-            FillShortTxIDSelector();
-        }
     }
 };
 

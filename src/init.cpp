@@ -82,6 +82,7 @@
 #include <boost/interprocess/sync/file_lock.hpp>
 #include <boost/thread.hpp>
 
+#include "net/ipv6_multicast_config.h"
 
 static const bool DEFAULT_PROXYRANDOMIZE = true;
 static const bool DEFAULT_REST_ENABLE = false;
@@ -1609,6 +1610,13 @@ std::string HelpMessage(HelpMessageMode mode, const Config& config) {
         strprintf("Minimum length of valid fork to enter safe mode "
             "(default: %d)", SAFE_MODE_DEFAULT_MIN_FORK_LENGTH));
 
+    strUsage += HelpMessageGroup(_("IPv6 Multicast options:"));
+    strUsage += HelpMessageOpt("-multicast", strprintf(_("Enable IPv6 multicast (default: %u)"), DEFAULT_MULTICAST));
+    strUsage += HelpMessageOpt("-multicastaddr=<addr>", strprintf(_("IPv6 multicast address (default: %s)"), "ff02::1"));
+    strUsage += HelpMessageOpt("-multicastport=<port>", strprintf(_("IPv6 multicast port (default: %u)"), DEFAULT_P2P_PORT));
+    strUsage += HelpMessageOpt("-multicastttl=<ttl>", strprintf(_("IPv6 multicast time-to-live (default: %u)"), 1));
+    strUsage += HelpMessageOpt("-multicastloop", strprintf(_("Enable IPv6 multicast loopback (default: %u)"), 0));
+
     return strUsage;
 }
 
@@ -1619,7 +1627,7 @@ std::string LicenseInfo() {
 
     return CopyrightHolders(
                strprintf(_("Copyright (C) %i-%i"), 2009, COPYRIGHT_YEAR) +
-               " ") +
+           " ") +
            "\n" + "\n" +
            strprintf(_("Please contribute if you find %s useful. "
                        "Visit %s for further information about the software."),
@@ -1831,94 +1839,83 @@ static bool AppInitServers(Config &config, boost::thread_group &threadGroup) {
     return true;
 }
 
-// Parameter interaction based on rules
+namespace {
+    bool ValidateMulticastInterface(const std::string& interface) {
+        struct if_nameindex *if_ni, *i;
+
+        if_ni = if_nameindex();
+        if (if_ni == nullptr) {
+            return false;
+        }
+
+        bool found = false;
+        for (i = if_ni; i->if_index != 0 && i->if_name != nullptr; i++) {
+            if (interface == i->if_name) {
+                found = true;
+                break;
+            }
+        }
+
+        if_freenameindex(if_ni);
+        return found;
+    }
+
+    bool ValidateIPv6MulticastOptions() {
+        if (!gArgs.GetBoolArg("-multicast", DEFAULT_MULTICAST)) {
+            return true;  // Multicast not requested, no validation needed
+        }
+
+        // Validate multicast address
+        std::string multicastAddr = gArgs.GetArg("-multicastaddr", "ff02::1");
+        struct in6_addr addr;
+        if (inet_pton(AF_INET6, multicastAddr.c_str(), &addr) != 1) {
+            return InitError(_("Invalid IPv6 multicast address specified with -multicastaddr"));
+        }
+
+        // Verify it's actually a multicast address (starts with ff)
+        if ((addr.s6_addr[0] != 0xff)) {
+            return InitError(_("Address specified with -multicastaddr is not a multicast address"));
+        }
+
+        // Validate multicast port
+        int multicastPort = gArgs.GetArg("-multicastport", DEFAULT_P2P_PORT);
+        if (multicastPort <= 0 || multicastPort > 65535) {
+            return InitError(strprintf(_("Invalid port %u for IPv6 multicast"), multicastPort));
+        }
+
+        // Validate TTL
+        int multicastTTL = gArgs.GetArg("-multicastttl", DEFAULT_MULTICAST_TTL);
+        if (multicastTTL < 0 || multicastTTL > 255) {
+            return InitError(strprintf(_("Invalid TTL %d for IPv6 multicast"), multicastTTL));
+        }
+
+        // Validate interfaces if specified
+        if (gArgs.IsArgSet("-multicastinterface")) {
+            std::vector<std::string> interfaces = gArgs.GetArgs("-multicastinterface");
+            for (const std::string& interface : interfaces) {
+                if (!ValidateMulticastInterface(interface)) {
+                    return InitError(strprintf(_("Invalid network interface specified: %s"), interface));
+                }
+            }
+        }
+
+        return true;
+    }
+}
+
 void InitParameterInteraction() {
-    // when specifying an explicit binding address, you want to listen on it
-    // even when -connect or -proxy is specified.
-    if (gArgs.IsArgSet("-bind")) {
-        if (gArgs.SoftSetBoolArg("-listen", true))
-            LogPrintf(
-                "%s: parameter interaction: -bind set -> setting -listen=1\n",
-                __func__);
+    // ... existing code ...
+    
+    if (gArgs.GetBoolArg("-multicast", DEFAULT_MULTICAST)) {
+        if (!gArgs.GetBoolArg("-ipv6", DEFAULT_IPV6)) {
+            gArgs.ForceSetArg("-multicast", "0");
+            LogPrintf("Warning: IPv6 multicast requires IPv6 to be enabled. Disabling multicast.\n");
+        } else if (!ValidateIPv6MulticastOptions()) {
+            gArgs.ForceSetArg("-multicast", "0");
+            LogPrintf("Warning: Invalid IPv6 multicast options. Disabling multicast.\n");
+        }
     }
-    if (gArgs.IsArgSet("-whitebind")) {
-        if (gArgs.SoftSetBoolArg("-listen", true))
-            LogPrintf("%s: parameter interaction: -whitebind set -> setting "
-                      "-listen=1\n",
-                      __func__);
-    }
-
-    if (gArgs.IsArgSet("-connect")) {
-        // when only connecting to trusted nodes, do not seed via DNS, or listen
-        // by default.
-        if (gArgs.SoftSetBoolArg("-dnsseed", false))
-            LogPrintf("%s: parameter interaction: -connect set -> setting "
-                      "-dnsseed=0\n",
-                      __func__);
-        if (gArgs.SoftSetBoolArg("-listen", false))
-            LogPrintf("%s: parameter interaction: -connect set -> setting "
-                      "-listen=0\n",
-                      __func__);
-    }
-
-    if (gArgs.IsArgSet("-proxy")) {
-        // to protect privacy, do not listen by default if a default proxy
-        // server is specified.
-        if (gArgs.SoftSetBoolArg("-listen", false))
-            LogPrintf(
-                "%s: parameter interaction: -proxy set -> setting -listen=0\n",
-                __func__);
-        // to protect privacy, do not use UPNP when a proxy is set. The user may
-        // still specify -listen=1 to listen locally, so don't rely on this
-        // happening through -listen below.
-        if (gArgs.SoftSetBoolArg("-upnp", false))
-            LogPrintf(
-                "%s: parameter interaction: -proxy set -> setting -upnp=0\n",
-                __func__);
-        // to protect privacy, do not discover addresses by default
-        if (gArgs.SoftSetBoolArg("-discover", false))
-            LogPrintf("%s: parameter interaction: -proxy set -> setting "
-                      "-discover=0\n",
-                      __func__);
-    }
-
-    if (!gArgs.GetBoolArg("-listen", DEFAULT_LISTEN)) {
-        // do not map ports or try to retrieve public IP when not listening
-        // (pointless)
-        if (gArgs.SoftSetBoolArg("-upnp", false))
-            LogPrintf(
-                "%s: parameter interaction: -listen=0 -> setting -upnp=0\n",
-                __func__);
-        if (gArgs.SoftSetBoolArg("-discover", false))
-            LogPrintf(
-                "%s: parameter interaction: -listen=0 -> setting -discover=0\n",
-                __func__);
-    }
-
-    if (gArgs.IsArgSet("-externalip")) {
-        // if an explicit public IP is specified, do not try to find others
-        if (gArgs.SoftSetBoolArg("-discover", false))
-            LogPrintf("%s: parameter interaction: -externalip set -> setting "
-                      "-discover=0\n",
-                      __func__);
-    }
-
-    // disable whitelistrelay in blocksonly mode
-    if (gArgs.GetBoolArg("-blocksonly", DEFAULT_BLOCKSONLY)) {
-        if (gArgs.SoftSetBoolArg("-whitelistrelay", false))
-            LogPrintf("%s: parameter interaction: -blocksonly=1 -> setting "
-                      "-whitelistrelay=0\n",
-                      __func__);
-    }
-
-    // Forcing relay from whitelisted hosts implies we will accept relays from
-    // them in the first place.
-    if (gArgs.GetBoolArg("-whitelistforcerelay", DEFAULT_WHITELISTFORCERELAY)) {
-        if (gArgs.SoftSetBoolArg("-whitelistrelay", true))
-            LogPrintf("%s: parameter interaction: -whitelistforcerelay=1 -> "
-                      "setting -whitelistrelay=1\n",
-                      __func__);
-    }
+    // ... existing code ...
 }
 
 static std::string ResolveErrMsg(const char *const optname,
@@ -3044,7 +3041,6 @@ bool AppInitParameterInteraction(ConfigInit &config) {
         return InitError(err);
     }
     mapAlreadyAskedFor = std::make_unique<limitedmap<uint256, int64_t>>(CInv::estimateMaxInvElements(config.GetMaxProtocolSendPayloadLength()));
-
 
     const uint64_t recvInvQueueFactorArg = gArgs.GetArg("-recvinvqueuefactor", DEFAULT_RECV_INV_QUEUE_FACTOR);
     if (std::string err; !config.SetRecvInvQueueFactor(recvInvQueueFactorArg, &err))

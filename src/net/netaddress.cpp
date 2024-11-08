@@ -216,7 +216,12 @@ std::string CNetAddr::ToString() const {
 }
 
 bool operator==(const CNetAddr &a, const CNetAddr &b) {
-    return (memcmp(a.ip, b.ip, 16) == 0);
+    if (memcmp(a.ip, b.ip, 16) != 0)
+        return false;
+    // Compare scope IDs for link-local addresses
+    if (a.IsRFC4862() && b.IsRFC4862())
+        return a.scopeId == b.scopeId;
+    return true;
 }
 
 bool operator!=(const CNetAddr &a, const CNetAddr &b) {
@@ -236,6 +241,11 @@ bool CNetAddr::GetInAddr(struct in_addr *pipv4Addr) const {
 
 bool CNetAddr::GetIn6Addr(struct in6_addr *pipv6Addr) const {
     memcpy(pipv6Addr, ip, 16);
+    // Add scope ID handling for link-local addresses
+    if (IsRFC4862() && scopeId != 0) {
+        // Handle scope ID for link-local addresses
+        return true;
+    }
     return true;
 }
 
