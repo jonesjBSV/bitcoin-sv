@@ -9,10 +9,10 @@ services:
       - bitcoin_data:/data
       - ./bitcoin.conf:/data/bitcoin.conf:ro
     ports:
-      - "0.0.0.0:18555:18555"    # IPv4 P2P (regtest, changed)
-      - "[::]:18556:18555"       # IPv6 P2P (regtest, changed)
-      - "0.0.0.0:18554:18554"    # IPv4 RPC (regtest, changed)
-      - "[::]:18557:18554"       # IPv6 RPC (regtest, changed)
+      - "0.0.0.0:18666:18666"    # IPv4 P2P (changed)
+      - "[::]:18667:18666"       # IPv6 P2P (changed)
+      - "0.0.0.0:18665:18665"    # IPv4 RPC (changed)
+      - "[::]:18668:18665"       # IPv6 RPC (changed)
     environment:
       - BITCOIN_RPC_USER=${BITCOIN_RPC_USER:-rpcuser}
       - BITCOIN_RPC_PASSWORD=${BITCOIN_RPC_PASSWORD:-rpcpassword}
