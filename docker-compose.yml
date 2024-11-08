@@ -9,10 +9,10 @@ services:
       - bitcoin_data:/data
       - ./bitcoin.conf:/data/bitcoin.conf:ro
     ports:
-      - "0.0.0.0:18666:18666"    # IPv4 P2P
-      - "[::]:18667:18667"       # IPv6 P2P (different port)
-      - "0.0.0.0:18665:18665"    # IPv4 RPC
-      - "[::]:18668:18668"       # IPv6 RPC (different port)
+      - "127.0.0.1:18666:18666"    # Changed to bind to localhost
+      - "[::1]:18667:18667"        # Changed to bind to localhost
+      - "127.0.0.1:18665:18665"    # Changed to bind to localhost
+      - "[::1]:18668:18668"        # Changed to bind to localhost
     environment:
       - BITCOIN_RPC_USER=${BITCOIN_RPC_USER:-rpcuser}
       - BITCOIN_RPC_PASSWORD=${BITCOIN_RPC_PASSWORD:-rpcpassword}
